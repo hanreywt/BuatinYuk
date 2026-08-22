@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start bot",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe run_bot.py",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "group": "build"
+    },
+    {
+      "label": "Audit environment",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe scripts/audit_env.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run tests",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe -m pytest",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "Check for secrets",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe scripts/check_secrets.py",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -204,3 +204,26 @@ def test_shipped_h3_workflow_builds_a_submittable_graph(real_workflow_dir: Path)
     # The model stack must survive untouched.
     assert built["4"]["inputs"]["unet_name"].startswith("minimax_h3")
     assert all("class_type" in node and "inputs" in node for node in built.values())
+
+
+def test_declared_defaults_beat_the_value_baked_into_the_graph(registry: WorkflowRegistry) -> None:
+    """A captured template carries whatever the captured run used.
+
+    txt2img_h3_plate was captured from a 73-frame run while its metadata declares 5,
+    so every job silently generated 73 frames until defaults were applied.
+    """
+    built = registry.get("test_wf").build({"prompt": "x"})
+    assert built["1"]["inputs"]["width"] == 512  # the declared default
+    assert built["1"]["inputs"]["length"] == 5   # graph has 5; metadata declares none
+
+
+def test_an_explicit_value_still_beats_the_default(registry: WorkflowRegistry) -> None:
+    built = registry.get("test_wf").build({"prompt": "x", "width": 1024})
+    assert built["1"]["inputs"]["width"] == 1024
+
+
+def test_shipped_h3_default_is_a_single_short_clip(real_workflow_dir: Path) -> None:
+    """Guards against a 73-frame, 218-second job for a one-image request."""
+    workflow = WorkflowRegistry.load(real_workflow_dir, strict=True).get("txt2img_h3_plate")
+    built = workflow.build({"prompt": "x"}, managed={"filename_prefix": "p"})
+    assert built["1"]["inputs"]["length"] == 5

@@ -13,6 +13,7 @@ It does not get to skip any of the steps above; it only fills in the request.
 from __future__ import annotations
 
 import asyncio
+import secrets
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -114,6 +115,11 @@ class Orchestrator:
         text = self._clean_text(request.text)
 
         parameters = {"prompt": text, **request.parameters}
+        # A seed baked into the template would make every generation identical, so the
+        # same prompt could never produce a second variation. Roll one per job unless
+        # the caller asked for a specific seed.
+        if "seed" in workflow.user_parameters and "seed" not in parameters:
+            parameters["seed"] = secrets.randbelow(2**32)
         # Validate now, so a bad request is refused at submit time with a useful
         # message rather than failing two minutes later in the worker.
         workflow.build(parameters, managed={"filename_prefix": "validation_probe"})

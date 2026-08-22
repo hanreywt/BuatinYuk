@@ -30,6 +30,7 @@ def graph() -> dict:
             "inputs": {"prompt": "", "width": 512, "height": 512, "length": 5},
         },
         "2": {"class_type": "Loader", "inputs": {"model_name": "locked.safetensors"}},
+        "4": {"class_type": "RandomNoise", "inputs": {"noise_seed": 20250822}},
         "3": {"class_type": "SaveImage", "inputs": {"filename_prefix": "out", "images": ["1", 0]}},
     }
 
@@ -48,6 +49,8 @@ def meta() -> dict:
                       "default": 512, "min": 256, "max": 1024, "step": 64},
             "length": {"node": "1", "input": "length", "type": "int",
                        "min": 5, "max": 124, "step": 17},
+            "seed": {"node": "4", "input": "noise_seed", "type": "int",
+                     "min": 0, "max": 4294967295},
             "filename_prefix": {"node": "3", "input": "filename_prefix",
                                 "type": "string", "managed": True},
         },

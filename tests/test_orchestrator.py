@@ -342,3 +342,24 @@ async def test_system_status_reports_comfyui_offline(repo, users, workflow_dir: 
 async def test_status_requires_authorisation(orchestrator) -> None:
     with pytest.raises(NotAuthorized):
         await orchestrator.system_status(STRANGER)
+
+
+async def test_each_job_gets_its_own_seed(orchestrator, repo) -> None:
+    """A baked-in seed made the same prompt produce a byte-identical image forever."""
+    seeds = set()
+    for _ in range(5):
+        accepted = await orchestrator.submit(request(text="same prompt every time"))
+        seeds.add(repo.get(accepted.job.id).parameters["seed"])
+    assert len(seeds) == 5
+
+
+async def test_an_explicit_seed_is_respected(orchestrator, repo) -> None:
+    """Reproducing an earlier result must stay possible."""
+    accepted = await orchestrator.submit(request(parameters={"seed": 12345}))
+    assert repo.get(accepted.job.id).parameters["seed"] == 12345
+
+
+async def test_the_seed_is_recorded_so_a_result_can_be_reproduced(orchestrator, repo) -> None:
+    accepted = await orchestrator.submit(request())
+    seed = repo.get(accepted.job.id).parameters["seed"]
+    assert isinstance(seed, int) and 0 <= seed < 2**32

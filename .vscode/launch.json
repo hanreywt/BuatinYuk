@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run bot",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_bot.py",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Audit environment",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/audit_env.py",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Verify generation (uses the GPU)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/verify_generation.py",
+      "console": "integratedTerminal"
+    }
+  ]
+}

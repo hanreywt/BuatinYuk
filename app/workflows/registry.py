@@ -155,6 +155,14 @@ class WorkflowSpec:
         graph = copy.deepcopy(self._graph)
         resolved: dict[str, Any] = {}
 
+        # Apply declared defaults first. Without this the value baked into the captured
+        # graph wins, which is rarely what the metadata says it should be - the txt2img
+        # template shipped with length=73 from the run it was captured from, while the
+        # metadata declares 5.
+        for name, spec in self.user_parameters.items():
+            if name not in params and spec.default is not None:
+                resolved[name] = _coerce(spec, spec.default)
+
         for name, raw_value in params.items():
             spec = self.parameters[name]
             resolved[name] = _coerce(spec, raw_value)
