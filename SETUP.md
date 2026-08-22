@@ -189,18 +189,95 @@ Slower than that usually means something else is using your GPU.
 
 ## Letting friends in
 
-The bot **ignores everyone** except the IDs in `ADMIN_TELEGRAM_IDS`. That is deliberate:
-your GPU, your electricity, your queue.
+The bot **ignores everyone** it does not know. That is deliberate: your GPU, your
+electricity, your queue.
 
-To add someone, get their numeric ID from [@userinfobot](https://t.me/userinfobot) and
-add it, comma separated:
+Open the dashboard at **http://127.0.0.1:8765** and click the **Admin** tab. Two ways to
+let someone in:
+
+**Add them directly.** Ask them to message
+[@userinfobot](https://t.me/userinfobot) for their numeric ID, type it into the form, pick
+a role and a daily limit, press Add. They can use the bot immediately.
+
+**Send them a code.** Press *Create code*, send them the code, and they redeem it in
+Telegram with `/redeem ABCD123456`. A code works **once**, expires, and can never make
+someone an admin.
+
+### Roles
+
+| Role | Can do |
+|---|---|
+| `user` | Generate, up to their daily limit |
+| `trusted` | The same, usually with a larger limit |
+| `admin` | Everything, no limit, sees the whole queue |
+
+You can disable someone temporarily, change their limit, or remove them entirely from the
+same tab. The owners listed in `ADMIN_TELEGRAM_IDS` show as **from .env** and can only be
+changed there — that way a mistake in the dashboard can never lock you out of it.
+
+---
+
+## Working on the code with Claude
+
+This project was built with **Claude Code** — an AI assistant that reads the project,
+writes code, runs the tests, and explains what it changed. You do not need it to *run*
+the bot, only to change it.
+
+### Install
+
+You need [Node.js](https://nodejs.org) 18+ first, then:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+Check it worked:
+
+```bash
+claude --version
+```
+
+### Use it
+
+```bash
+cd BuatinDong
+claude
+```
+
+It reads the project on its own. Ask in plain language:
 
 ```
-ADMIN_TELEGRAM_IDS=123456789,987654321
+read PROJECT_STATUS.md and tell me what this project does
+why did my last job fail?
+add a /ping command that replies pong
+run the tests
 ```
 
-Restart the bot. **Note:** everyone listed there is an admin and has no daily limit. Roles
-and quotas exist in the code but are not yet wired to a user list — see `PROJECT_STATUS.md`.
+Type `/exit` to leave. It asks before changing files or running commands — read what it
+proposes rather than approving blindly.
+
+### Start here
+
+**`PROJECT_STATUS.md` is the handover document.** It records what works, measured
+timings, the bugs already found and why they must not come back, and what to do next. A
+good first message is literally:
+
+```
+read PROJECT_STATUS.md and SETUP.md, then tell me what you would work on next
+```
+
+### Worth knowing
+
+- It needs an [Anthropic account](https://claude.ai). A subscription covers normal use;
+  there is also pay-as-you-go.
+- **It costs money to use Claude, but not to run the bot.** Generation happens on your own
+  GPU and is free.
+- Never paste your `.env`, your bot token, or any API key into a chat. Claude can read the
+  files it needs by itself.
+- Run `python -m pytest` after any change. There are 335 tests and they catch a lot.
+
+Prefer a different editor? The project is plain Python — VS Code, PyCharm, or anything
+else works. `.vscode/` already has run configurations if you use VS Code.
 
 ---
 

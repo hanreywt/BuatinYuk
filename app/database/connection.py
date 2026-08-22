@@ -26,7 +26,7 @@ from app.utils.logging import get_logger
 
 log = get_logger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -64,6 +64,33 @@ CREATE TABLE IF NOT EXISTS job_outputs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_outputs_job ON job_outputs (job_id);
+
+-- Schema 2: people, and how they were let in.
+CREATE TABLE IF NOT EXISTS users (
+    telegram_user_id INTEGER PRIMARY KEY,
+    role             TEXT    NOT NULL DEFAULT 'user',
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    daily_quota      INTEGER NOT NULL DEFAULT 10,
+    display_name     TEXT,
+    note             TEXT,
+    approved_by      INTEGER,
+    created_at       TEXT    NOT NULL,
+    updated_at       TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS invites (
+    code        TEXT    PRIMARY KEY,
+    role        TEXT    NOT NULL DEFAULT 'user',
+    daily_quota INTEGER NOT NULL DEFAULT 10,
+    note        TEXT,
+    created_by  INTEGER,
+    created_at  TEXT    NOT NULL,
+    expires_at  TEXT    NOT NULL,
+    used_at     TEXT,
+    used_by     INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_invites_unused ON invites (used_at, expires_at);
 """
 
 

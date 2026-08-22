@@ -4,8 +4,12 @@ Every request passes through `authorise()` before anything else happens. Nothing
 downstream re-checks identity, so this is the single place where access is decided -
 which is exactly why it must never depend on model reasoning or on a username.
 
-v0.1 backs the user list with the configured admin ids. Phase 3 replaces
-`_lookup` with a database query; callers are unaffected.
+Identity comes from two places, in this order:
+
+1. `ADMIN_TELEGRAM_IDS` from configuration - the bootstrap owners. They are always
+   admins and can never be locked out by a database edit, which matters because the
+   database is what the admin tools edit.
+2. The `users` table - everyone let in afterwards, by approval or by invite.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from dataclasses import dataclass
 
 from app.jobs.repository import JobRepository
 from app.users.models import Role, User, admin
+from app.users.repository import Invite, UserRepository
 from app.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -77,10 +82,12 @@ class UserService:
         *,
         admin_ids: Sequence[int],
         jobs: JobRepository,
+        users: UserRepository | None = None,
         default_daily_quota: int = 10,
     ) -> None:
         self._admins = frozenset(admin_ids)
         self._jobs = jobs
+        self._users = users
         self._default_quota = default_daily_quota
 
         if not self._admins:
@@ -89,10 +96,16 @@ class UserService:
     # ---------------- lookup ----------------
 
     def _lookup(self, telegram_user_id: int) -> User | None:
-        """The only source of identity. Phase 3 swaps this for a database query."""
+        """The only source of identity.
+
+        Configured admins win outright: they must stay reachable even if the users
+        table says otherwise, since that table is what the admin tools write to.
+        """
         if telegram_user_id in self._admins:
             return admin(telegram_user_id)
-        return None
+        if self._users is None:
+            return None
+        return self._users.get(telegram_user_id)
 
     def get(self, telegram_user_id: int) -> User | None:
         return self._lookup(telegram_user_id)
@@ -106,6 +119,34 @@ class UserService:
 
     def list_admins(self) -> list[int]:
         return sorted(self._admins)
+
+    def is_bootstrap_admin(self, telegram_user_id: int) -> bool:
+        """True for an id from configuration, which cannot be edited away."""
+        return telegram_user_id in self._admins
+
+    def list_users(self) -> list[User]:
+        """Everyone the bot knows: configured owners first, then the database."""
+        listed = [admin(uid) for uid in sorted(self._admins)]
+        if self._users is not None:
+            listed.extend(
+                u for u in self._users.list_all() if u.telegram_user_id not in self._admins
+            )
+        return listed
+
+    @property
+    def store(self) -> UserRepository | None:
+        """The user table, for admin tools. None when no database is wired up."""
+        return self._users
+
+    def redeem_invite(
+        self, code: str, telegram_user_id: int, display_name: str | None = None
+    ) -> User:
+        """Let someone in with a code. Never grants admin, whatever the code says."""
+        if self._users is None:
+            raise AuthorizationError(
+                "no user store configured", "Invites are not available on this server."
+            )
+        return self._users.redeem(code, telegram_user_id, display_name)
 
     # ---------------- gates ----------------
 

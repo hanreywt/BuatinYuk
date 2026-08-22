@@ -21,6 +21,7 @@ from app.comfy.errors import ComfyError
 from app.jobs.models import JobStatus
 from app.orchestrator.service import GenerationRequest, Orchestrator
 from app.services.uploads import UploadRejected
+from app.users.repository import InviteError
 from app.users.service import AuthorizationError
 from app.utils.logging import get_logger
 from app.workflows.registry import WorkflowError
@@ -75,7 +76,8 @@ def _handle_errors(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             await func(update, context)
-        except (AuthorizationError, WorkflowError, ComfyError, UploadRejected) as exc:
+        except (AuthorizationError, WorkflowError, ComfyError, UploadRejected,
+                InviteError) as exc:
             log.info(
                 "bot.refused",
                 handler=func.__name__,
@@ -119,6 +121,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _orchestrator(context).users.authorise(update.effective_user.id)
     await _reply(update, HELP_TEXT, markdown=True)
+
+
+@_handle_errors
+async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/redeem <code> - join using an invite code.
+
+    The one command a stranger may run, since it is how someone becomes known. It
+    still cannot grant admin: that is enforced where the code is created and again
+    where it is consumed.
+    """
+    user = update.effective_user
+    code = (context.args[0] if context.args else "").strip()
+    if not code:
+        await _reply(update, "Send the code you were given, for example:\n/redeem ABCD123456")
+        return
+
+    orchestrator = _orchestrator(context)
+    if orchestrator.users.is_known(user.id):
+        await _reply(update, "You already have access. Send /start to begin.")
+        return
+
+    account = orchestrator.users.redeem_invite(
+        code, user.id, display_name=(user.full_name or user.username or None)
+    )
+    log.info("bot.invite_redeemed", user_id=user.id, role=account.role.value)
+    await _reply(
+        update,
+        f"Welcome. You are signed in as {account.role.value} with "
+        f"{account.daily_quota} generations a day.\n\n"
+        "Send a description of what you want, or /help for what I can do.",
+    )
 
 
 # ---------------- generation ----------------

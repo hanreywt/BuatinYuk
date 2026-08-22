@@ -157,9 +157,14 @@ python -m pytest                    # 207 tests, no GPU or network needed
 
 ### The dashboard
 
-With the bot running, open **http://127.0.0.1:8765**. It shows the live queue, what is
-running and for how long, per-workflow average times, and recent jobs. You can pause the
-worker or cancel a job from it.
+With the bot running, open **http://127.0.0.1:8765**.
+
+**Queue tab** — the live queue, what is running and for how long, per-workflow average
+times, recent jobs. Pause the worker or cancel a job.
+
+**Admin tab** — add people by Telegram ID, create single-use invite codes, set daily
+limits, disable or remove access. Users listed in `ADMIN_TELEGRAM_IDS` appear as *from
+.env* and are only editable there, so a dashboard mistake cannot lock you out.
 
 It binds to loopback only and has no login, because nothing remote can reach it. Setting
 `DASHBOARD_HOST` to anything else is refused at startup. Set `DASHBOARD_ENABLED=false` to
@@ -219,6 +224,19 @@ Planned for Phase 3, designed now so it is not bolted on later:
 - Roles: `ADMIN` (manage users, quotas, queue) · `TRUSTED` (higher quota) · `USER` (daily quota).
 - Every output is owned by the user who requested it. One user's history, files, and
   "upscale that last one" references can never resolve to another user's results.
+
+## Working on this with Claude Code
+
+```bash
+npm install -g @anthropic-ai/claude-code   # needs Node 18+
+cd BuatinDong
+claude
+```
+
+Start with `read PROJECT_STATUS.md and tell me what to work on next` — that file is the
+handover document and is kept current. Run `python -m pytest` after any change.
+
+Full instructions, written for someone new, are in [SETUP.md](SETUP.md).
 
 ## Layout
 

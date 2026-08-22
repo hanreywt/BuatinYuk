@@ -35,6 +35,7 @@ from app.orchestrator.recovery import RecoveryService
 from app.orchestrator.service import Orchestrator
 from app.orchestrator.worker import GenerationWorker
 from app.services.uploads import UploadService
+from app.users.repository import UserRepository
 from app.users.service import UserService
 from app.web.server import Dashboard
 from app.utils.logging import get_logger
@@ -78,6 +79,7 @@ class GenerationServer:
         users = UserService(
             admin_ids=settings.admin_telegram_ids,
             jobs=jobs,
+            users=UserRepository(self._database),
             default_daily_quota=settings.default_daily_quota,
         )
 
@@ -115,6 +117,7 @@ class GenerationServer:
                 jobs=jobs,
                 worker=self._worker,
                 comfy=self._comfy,
+                users=users,
                 host=settings.dashboard_host,
                 port=settings.dashboard_port,
             )
@@ -192,6 +195,8 @@ class GenerationServer:
 def _register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("start", handlers.start))
     application.add_handler(CommandHandler("help", handlers.help_command))
+    # The one command a stranger may run: it is how someone becomes known.
+    application.add_handler(CommandHandler("redeem", handlers.redeem))
     application.add_handler(CommandHandler("generate", handlers.generate))
     application.add_handler(CommandHandler("video", handlers.video))
     application.add_handler(CommandHandler("status", handlers.status))

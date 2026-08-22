@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Generation queue</title>
+<title>BuatinYuk</title>
 <style>
   :root {
     --bg: #0f1115; --panel: #171a21; --line: #272c36;
@@ -38,8 +38,8 @@
   table { width:100%; border-collapse:collapse; }
   th { text-align:left; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em;
        color:var(--dim); padding:.5rem 1rem; font-weight:600; }
-  td { padding:.55rem 1rem; border-top:1px solid var(--line); vertical-align:top; }
-  td.req { color:var(--dim); max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  td { padding:.55rem 1rem; border-top:1px solid var(--line); vertical-align:middle; }
+  td.req { color:var(--dim); max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .tag { font-size:.72rem; padding:.1rem .45rem; border-radius:4px; border:1px solid var(--line); color:var(--dim); }
   .st { font-weight:600; font-size:.8rem; }
   .st.generating{color:var(--busy)} .st.queued{color:var(--warn)}
@@ -49,18 +49,32 @@
   .bar > i { display:block; height:100%; background:var(--accent); width:0; transition:width .4s; }
   footer { padding:0 1.25rem 2rem; color:var(--dim); font-size:.78rem; max-width:1100px; margin:0 auto; }
   code { background:var(--bg); padding:.1rem .3rem; border-radius:4px; }
+  .tabs { display:flex; gap:.25rem; }
+  .tab { border:none; background:transparent; color:var(--dim); padding:.35rem .7rem; border-radius:7px; }
+  .tab.on { background:var(--bg); color:var(--text); }
+  .form { display:flex; gap:.5rem; flex-wrap:wrap; padding:.85rem 1rem; border-top:1px solid var(--line); }
+  .form input, .form select { font:inherit; padding:.4rem .55rem; border-radius:7px;
+      border:1px solid var(--line); background:var(--bg); color:var(--text); flex:1; min-width:7rem; }
+  .hint { margin:0; padding:0 1rem 1rem; color:var(--dim); font-size:.8rem; }
+  .hint a { color:var(--accent); }
+  .mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:.05em; }
+  .muted { color:var(--dim); }
 </style>
 </head>
 <body>
 <header>
-  <h1>Generation queue</h1>
+  <h1>BuatinYuk</h1>
+  <nav class="tabs">
+    <button class="tab on" data-tab="queue">Queue</button>
+    <button class="tab" data-tab="admin">Admin</button>
+  </nav>
   <div class="pills" id="pills"></div>
   <div class="spacer"></div>
   <button id="toggle">…</button>
   <span class="pill" id="tick">connecting</span>
 </header>
 
-<main>
+<main id="tab-queue">
   <section>
     <h2>Active</h2>
     <div class="bar"><i id="progress"></i></div>
@@ -76,23 +90,84 @@
   </section>
 </main>
 
+<main id="tab-admin" hidden>
+  <section>
+    <h2>People</h2>
+    <div id="users"></div>
+    <form id="addUser" class="form">
+      <input name="id" inputmode="numeric" placeholder="Telegram ID, e.g. 123456789" required>
+      <input name="name" placeholder="Name (optional)">
+      <select name="role">
+        <option value="user">user</option>
+        <option value="trusted">trusted</option>
+        <option value="admin">admin</option>
+      </select>
+      <input name="quota" inputmode="numeric" value="10" title="Jobs per day" style="max-width:5.5rem">
+      <button type="submit">Add</button>
+    </form>
+    <p class="hint">
+      Ask them to message <a href="https://t.me/userinfobot" target="_blank" rel="noreferrer">@userinfobot</a>
+      for their numeric ID. Never their <code>@username</code> — usernames can be changed, IDs cannot.
+    </p>
+  </section>
+
+  <section>
+    <h2>Invite codes</h2>
+    <div id="invites"></div>
+    <form id="addInvite" class="form">
+      <select name="role">
+        <option value="user">user</option>
+        <option value="trusted">trusted</option>
+      </select>
+      <input name="quota" inputmode="numeric" value="10" title="Jobs per day" style="max-width:5.5rem">
+      <input name="days" inputmode="numeric" value="7" title="Valid for this many days" style="max-width:5.5rem">
+      <input name="note" placeholder="Who is it for? (optional)">
+      <button type="submit">Create code</button>
+    </form>
+    <p class="hint">
+      Send the code to someone and they redeem it in Telegram with <code>/redeem CODE</code>.
+      Single use, expires, and can never grant admin.
+    </p>
+  </section>
+</main>
+
 <footer>
   Local only — this page is served on loopback and is not reachable from the network.
   Pausing stops the worker taking <em>new</em> jobs; anything already running finishes.
-  To stop a running job, cancel it. Same as <code>/cancel &lt;id&gt;</code> in Telegram.
+  To stop a running job, cancel it.
 </footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
 let paused = false;
+let tab = "queue";
 
 const fmt = (s) => s == null ? "—" : (s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`);
+const dash = '<span class="muted">—</span>';
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
 
 function dot(cls, label) {
   return `<span class="pill"><span class="dot ${cls}"></span>${label}</span>`;
 }
 
-function rows(list, {showQueue = false} = {}) {
+async function send(url, method, body) {
+  const r = await fetch(url, {
+    method,
+    headers: body ? {"Content-Type": "application/json"} : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) { alert(await r.text()); return null; }
+  return r.json();
+}
+
+// ---------------- queue ----------------
+
+function rows(list, opts) {
+  const showQueue = opts && opts.showQueue;
   if (!list.length) return `<div class="empty">Nothing here.</div>`;
   return `<table><thead><tr>
       <th>Job</th><th>Status</th><th>Type</th><th>Request</th><th>Time</th><th></th>
@@ -110,18 +185,13 @@ function rows(list, {showQueue = false} = {}) {
     </tr>`).join("") + `</tbody></table>`;
 }
 
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, c =>
-    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-}
-
 async function cancelJob(id) {
-  await fetch(`/api/jobs/${id}/cancel`, {method: "POST"});
+  await send(`/api/jobs/${id}/cancel`, "POST");
   refresh();
 }
 
 $("toggle").onclick = async () => {
-  await fetch(`/api/worker/${paused ? "resume" : "pause"}`, {method: "POST"});
+  await send(`/api/worker/${paused ? "resume" : "pause"}`, "POST");
   refresh();
 };
 
@@ -147,6 +217,8 @@ async function refresh() {
     dot("", `${s.stats.completed_today} done today`),
   ].join("");
 
+  if (tab === "admin") { refreshAdmin(); return; }
+
   const running = s.queue.find(j => j.status === "generating");
   const avg = s.stats.averages.find(a => running && a.workflow === running.workflow);
   $("progress").style.width =
@@ -162,8 +234,115 @@ async function refresh() {
     : `<div class="empty">No completed jobs yet.</div>`;
 }
 
+// ---------------- admin ----------------
+
+async function refreshAdmin() {
+  const u = await (await fetch("/api/users")).json();
+  $("users").innerHTML = !u.users.length
+    ? `<div class="empty">Nobody yet.</div>`
+    : `<table><thead><tr>
+         <th>Telegram ID</th><th>Name</th><th>Role</th><th>Today</th><th>Status</th><th></th>
+       </tr></thead><tbody>` + u.users.map(x => `
+      <tr>
+        <td class="mono">${x.id}</td>
+        <td>${esc(x.name) || dash}</td>
+        <td><span class="tag">${x.role}</span>${x.from_config ? ' <span class="tag">from .env</span>' : ""}</td>
+        <td>${x.used_today}${x.quota === null ? ' <span class="muted">/ no limit</span>' : ` / ${x.quota}`}</td>
+        <td class="st ${x.enabled ? "completed" : "cancelled"}">${x.enabled ? "active" : "disabled"}</td>
+        <td>${x.from_config
+          ? '<span class="muted">edit in .env</span>'
+          : `<button onclick="toggleUser(${x.id}, ${!x.enabled})">${x.enabled ? "Disable" : "Enable"}</button>
+             <button onclick="editQuota(${x.id}, ${x.quota ?? 10})">Quota</button>
+             <button class="danger" onclick="removeUser(${x.id})">Remove</button>`}</td>
+      </tr>`).join("") + `</tbody></table>`;
+
+  const i = await (await fetch("/api/invites")).json();
+  $("invites").innerHTML = !i.invites.length
+    ? `<div class="empty">No codes yet.</div>`
+    : `<table><thead><tr>
+         <th>Code</th><th>Role</th><th>Quota</th><th>State</th><th>For</th><th></th>
+       </tr></thead><tbody>` + i.invites.map(x => `
+      <tr>
+        <td class="mono">${x.code}</td>
+        <td><span class="tag">${x.role}</span></td>
+        <td>${x.quota}/day</td>
+        <td class="st ${x.state === "valid" ? "queued" : x.state === "used" ? "completed" : "cancelled"}">
+          ${x.state}${x.used_by ? ` <span class="muted">by ${x.used_by}</span>` : ""}</td>
+        <td class="req">${esc(x.note) || dash}</td>
+        <td>${x.state === "valid"
+          ? `<button onclick="copyCode('${x.code}')">Copy</button>
+             <button class="danger" onclick="revoke('${x.code}')">Revoke</button>` : ""}</td>
+      </tr>`).join("") + `</tbody></table>`;
+}
+
+async function toggleUser(id, enabled) {
+  await send(`/api/users/${id}/enabled`, "POST", {enabled});
+  refreshAdmin();
+}
+
+async function removeUser(id) {
+  if (confirm(`Remove ${id}?\n\nThey lose access immediately. Their past jobs are kept.`)) {
+    await send(`/api/users/${id}`, "DELETE");
+    refreshAdmin();
+  }
+}
+
+async function editQuota(id, current) {
+  const v = prompt("Jobs per day for this person:", current);
+  if (v !== null) {
+    await send(`/api/users/${id}/quota`, "POST", {quota: v});
+    refreshAdmin();
+  }
+}
+
+async function revoke(code) {
+  if (confirm(`Revoke ${code}?\n\nIt can no longer be redeemed.`)) {
+    await send(`/api/invites/${code}`, "DELETE");
+    refreshAdmin();
+  }
+}
+
+async function copyCode(code) {
+  try { await navigator.clipboard.writeText(code); }
+  catch { prompt("Copy this code:", code); }
+}
+
+$("addUser").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  if (await send("/api/users", "POST", f)) {
+    e.target.reset();
+    e.target.quota.value = 10;
+    refreshAdmin();
+  }
+};
+
+$("addInvite").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  const made = await send("/api/invites", "POST", f);
+  if (made) {
+    e.target.note.value = "";
+    refreshAdmin();
+    copyCode(made.code);
+    alert(`Code ${made.code} created and copied.\n\nThey redeem it in Telegram with:\n/redeem ${made.code}`);
+  }
+};
+
+// ---------------- tabs ----------------
+
+document.querySelectorAll(".tab").forEach(b => {
+  b.onclick = () => {
+    tab = b.dataset.tab;
+    document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
+    $("tab-queue").hidden = tab !== "queue";
+    $("tab-admin").hidden = tab !== "admin";
+    refresh();
+  };
+});
+
 refresh();
-setInterval(refresh, 2000);
+setInterval(() => { if (tab === "queue") refresh(); }, 2000);
 </script>
 </body>
 </html>

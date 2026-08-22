@@ -21,6 +21,9 @@ from app.comfy.client import ComfyUIClient
 from app.jobs.models import JobStatus
 from app.jobs.repository import JobRepository
 from app.orchestrator.worker import GenerationWorker
+from app.users.models import Role
+from app.users.repository import InviteError
+from app.users.service import UserService
 from app.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -38,6 +41,7 @@ class Dashboard:
         jobs: JobRepository,
         worker: GenerationWorker,
         comfy: ComfyUIClient,
+        users: UserService | None = None,
         host: str = "127.0.0.1",
         port: int = 8765,
     ) -> None:
@@ -49,6 +53,7 @@ class Dashboard:
         self._jobs = jobs
         self._worker = worker
         self._comfy = comfy
+        self._users = users
         self._host = host
         self._port = port
         self._runner: web.AppRunner | None = None
@@ -68,6 +73,14 @@ class Dashboard:
                 web.post("/api/worker/pause", self._pause),
                 web.post("/api/worker/resume", self._resume),
                 web.post("/api/jobs/{job_id}/cancel", self._cancel),
+                web.get("/api/users", self._list_users),
+                web.post("/api/users", self._add_user),
+                web.post("/api/users/{user_id}/enabled", self._set_enabled),
+                web.post("/api/users/{user_id}/quota", self._set_quota),
+                web.delete("/api/users/{user_id}", self._remove_user),
+                web.get("/api/invites", self._list_invites),
+                web.post("/api/invites", self._create_invite),
+                web.delete("/api/invites/{code}", self._revoke_invite),
             ]
         )
         self._runner = web.AppRunner(app, access_log=None)
@@ -154,6 +167,131 @@ class Dashboard:
                 break
         return web.json_response({"cancelled": cancelled})
 
+    # ---------------- people ----------------
+
+    def _require_users(self) -> UserService:
+        if self._users is None:
+            raise web.HTTPServiceUnavailable(text="user management is not configured")
+        return self._users
+
+    def _require_store(self):
+        store = self._require_users().store
+        if store is None:
+            raise web.HTTPServiceUnavailable(text="no user store is configured")
+        return store
+
+    async def _list_users(self, _request: web.Request) -> web.Response:
+        service = self._require_users()
+        used_today = self._jobs.count_for_user_today
+        return web.json_response(
+            {
+                "users": [
+                    {
+                        "id": u.telegram_user_id,
+                        "role": u.role.value,
+                        "enabled": u.enabled,
+                        "quota": None if u.has_unlimited_quota else u.daily_quota,
+                        "used_today": used_today(u.telegram_user_id),
+                        "name": u.display_name,
+                        # A configured owner cannot be edited away from here. Saying so
+                        # is clearer than letting the buttons fail.
+                        "from_config": service.is_bootstrap_admin(u.telegram_user_id),
+                    }
+                    for u in service.list_users()
+                ],
+                "roles": [r.value for r in Role],
+            }
+        )
+
+    async def _add_user(self, request: web.Request) -> web.Response:
+        store = self._require_store()
+        body = await _json_body(request)
+
+        user_id = _positive_int(body.get("id"), "Telegram ID")
+        store.upsert(
+            user_id,
+            role=_role(body.get("role", "user")),
+            daily_quota=_positive_int(body.get("quota", 10), "quota", allow_zero=True),
+            display_name=(body.get("name") or None),
+            note=(body.get("note") or None),
+        )
+        return web.json_response({"added": user_id})
+
+    async def _set_enabled(self, request: web.Request) -> web.Response:
+        store = self._require_store()
+        user_id = _positive_int(request.match_info["user_id"], "Telegram ID")
+        enabled = bool((await _json_body(request)).get("enabled", True))
+        if not store.set_enabled(user_id, enabled):
+            raise web.HTTPNotFound(text="no such user")
+        return web.json_response({"id": user_id, "enabled": enabled})
+
+    async def _set_quota(self, request: web.Request) -> web.Response:
+        store = self._require_store()
+        user_id = _positive_int(request.match_info["user_id"], "Telegram ID")
+        quota = _positive_int(
+            (await _json_body(request)).get("quota"), "quota", allow_zero=True
+        )
+        if not store.set_quota(user_id, quota):
+            raise web.HTTPNotFound(text="no such user")
+        return web.json_response({"id": user_id, "quota": quota})
+
+    async def _remove_user(self, request: web.Request) -> web.Response:
+        service = self._require_users()
+        user_id = _positive_int(request.match_info["user_id"], "Telegram ID")
+        if service.is_bootstrap_admin(user_id):
+            raise web.HTTPBadRequest(
+                text="This owner comes from ADMIN_TELEGRAM_IDS in .env and must be "
+                "removed there, not here."
+            )
+        if not self._require_store().remove(user_id):
+            raise web.HTTPNotFound(text="no such user")
+        return web.json_response({"removed": user_id})
+
+    async def _list_invites(self, _request: web.Request) -> web.Response:
+        store = self._require_store()
+        return web.json_response(
+            {
+                "invites": [
+                    {
+                        "code": i.code,
+                        "role": i.role.value,
+                        "quota": i.daily_quota,
+                        "state": i.state(),
+                        "used_by": i.used_by,
+                        "expires_at": i.expires_at.isoformat() if i.expires_at else None,
+                        "note": i.note,
+                    }
+                    for i in store.list_invites()
+                ]
+            }
+        )
+
+    async def _create_invite(self, request: web.Request) -> web.Response:
+        service = self._require_users()
+        store = self._require_store()
+        body = await _json_body(request)
+
+        admins = service.list_admins()
+        try:
+            invite = store.create_invite(
+                created_by=admins[0] if admins else 0,
+                role=_role(body.get("role", "user")),
+                daily_quota=_positive_int(body.get("quota", 10), "quota", allow_zero=True),
+                note=(body.get("note") or None),
+                valid_days=_positive_int(body.get("days", 7), "days"),
+            )
+        except InviteError as exc:
+            raise web.HTTPBadRequest(text=exc.user_message) from exc
+
+        return web.json_response(
+            {"code": invite.code, "expires_at": invite.expires_at.isoformat()}
+        )
+
+    async def _revoke_invite(self, request: web.Request) -> web.Response:
+        if not self._require_store().revoke_invite(request.match_info["code"]):
+            raise web.HTTPNotFound(text="no such unused invite")
+        return web.json_response({"revoked": request.match_info["code"]})
+
     # ---------------- shaping ----------------
 
     def _describe(self, job: Any) -> dict[str, Any]:
@@ -195,3 +333,33 @@ class Dashboard:
 
 def _kind_of(workflow_id: str) -> str:
     return "video" if "video" in workflow_id else "image"
+
+
+async def _json_body(request: web.Request) -> dict[str, Any]:
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001 - any malformed body is the same problem
+        raise web.HTTPBadRequest(text="expected a JSON object") from exc
+    if not isinstance(body, dict):
+        raise web.HTTPBadRequest(text="expected a JSON object")
+    return body
+
+
+def _positive_int(value: Any, label: str, *, allow_zero: bool = False) -> int:
+    """Telegram IDs and quotas are numbers. Anything else is a mistake, not a value."""
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        raise web.HTTPBadRequest(text=f"{label} must be a number") from None
+    if number < 0 or (number == 0 and not allow_zero):
+        raise web.HTTPBadRequest(text=f"{label} must be a positive number") from None
+    return number
+
+
+def _role(value: Any) -> Role:
+    try:
+        return Role(str(value).strip().lower())
+    except ValueError:
+        raise web.HTTPBadRequest(
+            text=f"role must be one of: {', '.join(r.value for r in Role)}"
+        ) from None
