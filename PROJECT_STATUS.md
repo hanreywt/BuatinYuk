@@ -3,7 +3,27 @@
 Living handover document. **Any Claude Code session picking this project up should read
 this file first**, then run `python scripts/audit_env.py` to re-verify the machine.
 
-Last updated: 2026-08-22 · Current version: **v0.1 code complete — awaiting live Telegram test**
+Last updated: 2026-08-22 · Current version: **v0.4 — running in daily use**
+
+---
+
+## What works right now
+
+The bot is **live and in real use**. From Telegram:
+
+| Send | Get |
+|---|---|
+| text | still image (~70–95s) |
+| `/video <text>` | short clip with sound (~120s) |
+| photo + caption | still, generated from that image |
+| photo + `/video` caption | clip animating that image |
+| `/status` `/queue` `/history` `/cancel <id>` `/workflows` `/help` | deterministic, no model in the loop |
+
+Plus a **local dashboard** at `http://127.0.0.1:8765` — live queue, what is running and
+for how long, per-workflow averages, pause/resume the worker, cancel a job.
+
+**311 tests pass** (`python -m pytest`). Everything below was verified on this machine,
+not assumed.
 
 ---
 
@@ -12,185 +32,167 @@ Last updated: 2026-08-22 · Current version: **v0.1 code complete — awaiting l
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 0 | Environment audit, project skeleton, docs | **DONE** |
-| 1 | Telegram -> ComfyUI MVP (single fixed workflow, single user) | **CODE COMPLETE**, needs live test |
-| 2 | Persistent job system + sequential GPU queue (SQLite) | **DONE** (bot integration pending) |
-| 3 | Multi-user, roles, invites, quotas, admin commands | PARTIAL — roles/quota engine built, DB-backed users + invites pending |
-| 4 | Local MCP server (narrow tools) | NOT STARTED |
-| 5 | Claude natural-language interpretation layer | NOT STARTED |
-| 6 | Video, upscale, inline buttons, retention | NOT STARTED |
+| 1 | Telegram → ComfyUI MVP | **DONE**, verified live |
+| 2 | Persistent jobs + sequential GPU queue | **DONE** |
+| 3 | Multi-user, roles, invites, quotas, admin commands | **PARTIAL** — role/quota engine and ownership scoping built and tested; users still come from `ADMIN_TELEGRAM_IDS`. DB-backed users, invite codes, admin commands remain |
+| 4 | Local MCP server | NOT STARTED |
+| 5 | Claude natural-language interpretation | NOT STARTED |
+| 6 | Upscale, inline buttons, retention | NOT STARTED |
+| — | Image input, video output, local dashboard | **DONE** (ahead of the original plan) |
+
+---
+
+## Measured performance (real runs on this machine)
+
+| Workflow | Output | Time |
+|---|---|---|
+| `txt2img_h3_plate` | 5 PNGs (~875 KB each), one delivered | ~67–95s |
+| `img2img_h3` | 5 PNGs from an input image | ~77–93s |
+| `txt2video_h3` | 1 mp4 with audio, ~1.4 MB | ~116s |
+| `img2video_h3` | 1 mp4 with audio, ~1.1 MB | ~133–198s |
+
+The dashboard computes these live from completed jobs, so they stay current.
+
+**Where the time goes**: on a cold run, ~56s of a 67s image job was loading the 25.9 GB
+text encoder; sampling was only ~37s. Models stay resident between jobs (GPU sits at
+~8.9/10.2 GB), so back-to-back jobs are much cheaper — but **switching between image and
+video workflows costs a reload**, because the video graph adds the audio VAE.
 
 ---
 
 ## Discovered environment (verified 2026-08-22)
 
-Re-run `python scripts/audit_env.py` to refresh. All values below were probed, not assumed.
+Re-run `python scripts/audit_env.py` to refresh.
 
 ### Host
-- **OS**: Windows 11 Pro (build 26200; Python reports it as "Windows 10")
-- **Python**: 3.11.9 at `C:\Users\user\AppData\Local\Programs\Python\Python311\python.exe`
-- **Git**: 2.49.0.windows.1 — available. Project is **not yet a git repo** (not initialised; awaiting authorisation)
-- **Claude Code**: 2.1.238
-- **GPU**: NVIDIA GeForce RTX 3080, **10 GB VRAM**, driver 591.86
-- **Disk**: `D:` 99 GB free (90% used) · `C:` 26 GB free (95% used) — **watch this**
-- **Shell**: PowerShell primary, Git Bash available
+- Windows 11 Pro, **Python 3.11.9**, Git 2.49, Claude Code 2.1.238
+- **NVIDIA RTX 3080, 10 GB VRAM**, driver 591.86
+- Disk: `D:` ~99 GB free · `C:` ~26 GB free — worth watching
 
 ### ComfyUI
-- **Type**: ComfyUI **Desktop** (Electron launcher), not a manual git clone
-- **Version**: 0.33.2, torch 2.12.1+cu130, its own bundled Python 3.13.12
-- **URL**: `http://127.0.0.1:8188` — **bound to loopback only** (no `--listen`). Good; keep it that way.
-- **Install root**: `D:\Comfy-Desktop\ComfyUI-Installs\ComfyUI\ComfyUI`
-- **Output dir**: `D:\Comfy-Desktop\ComfyUI-Shared\output`
-- **Input dir**: `D:\Comfy-Desktop\ComfyUI-Shared\input`
-- **Models root**: `D:\Comfy-Desktop\ComfyUI-Shared\models`
-- **Saved UI workflows**: `...\ComfyUI\user\default\workflows\` (37 files, all `Rey_*`)
-- **Manager**: enabled (`--enable-manager`)
+- **Desktop build 0.33.2**, torch 2.12.1+cu130, its own Python 3.13
+- `http://127.0.0.1:8188` — **loopback only, no `--listen`**. Keep it that way.
+- Install: `D:\Comfy-Desktop\ComfyUI-Installs\ComfyUI\ComfyUI`
+- Output: `D:\Comfy-Desktop\ComfyUI-Shared\output` · Input: `...\input` · Models: `...\models`
+- 37 saved `Rey_*` UI workflows — a useful source of verified graphs
 
-### Installed models — IMPORTANT CONSTRAINT
-There are **no image checkpoints installed at all**. The entire stack is one video model:
+### Models — the whole stack is one video model
+No image checkpoints exist. Everything runs on **MiniMax H3**:
+`minimax_h3_fl2va_pruned_int8_convrot` (20 GB) + `qwen3vl_32b_minimax_h3_int8_convrot`
+text encoder (25.9 GB) + video VAE (5 GB) + **audio VAE** (0.6 GB) + an 8-step turbo LoRA.
+Also installed but unused: `film_net_fp16` (frame interpolation), `birefnet` (background
+removal).
 
-| Slot | File | Size |
-|------|------|------|
-| diffusion_models | `minimax_h3_fl2va_pruned_int8_convrot.safetensors` | 20.0 GB |
-| text_encoders | `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` | 25.9 GB |
-| vae | `minimax_h3_video_vae_fp16.safetensors` | 5.0 GB |
-| vae | `minimax_h3_audio_vae_fp32.safetensors` | 0.6 GB |
-| loras | `minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors` | 1.9 GB |
-| frame_interpolation | `film_net_fp16.safetensors` | 0.07 GB |
-| background_removal | `birefnet.safetensors` | 0.4 GB |
+`checkpoints/`, `controlnet/`, `upscale_models/` are all empty.
 
-Empty: `checkpoints`, `controlnet`, `upscale_models`, `clip_vision`, `embeddings`, etc.
-
-**Consequence**: "text to image" on this machine means *running the MiniMax H3 video model at
-its shortest clip length and saving the frames as PNGs*. That is exactly how the existing
-`Rey_Temple_Plate` workflow produces stills. There is no SD/SDXL/Flux fast path available.
-
-**Consequence**: 46 GB of weights against 10 GB of VRAM means heavy offloading. Expect
-generation times in **minutes, not seconds**, and expect the first request after an idle
-period to be slower (model reload). Phase 1 timeouts must be generous.
-
-### Known-good workflow (captured, verified)
-`workflows/txt2img_h3_plate.api.json` — 13 nodes, extracted directly from ComfyUI's own
-execution history (`prompt_id f813cb25-1be7-4a27-b89a-69c56eeb110d`, status `success`).
-This is API-format JSON, ready to POST to `/prompt`. Its editable parameters are documented
-in `workflows/txt2img_h3_plate.meta.json`.
-
-Editable: `prompt`, `width`, `height`, `length`, `seed`, `steps`, `filename_prefix`.
-Not available in this graph: negative prompt, CFG scale, sampler choice, model choice.
-
-The original run used `length=73` (73 PNGs, 608x1088). For single-image jobs use `length=5`
-(the node's minimum; step grid is 17).
+**A still is a 5-frame clip.** `length=5` is the node minimum, so a single image costs 5
+frames regardless; four are kept on disk and one delivered.
 
 ---
 
-## Phase 1 progress
+## Installed workflows
 
-Built and verified (88 tests passing, `python -m pytest`):
+All four live in `workflows/` as `<id>.api.json` + `<id>.meta.json`.
 
-| Component | File | State |
+| ID | Task | Source |
 |---|---|---|
-| Typed configuration | `app/config/settings.py` | Done. Secrets in `SecretStr`, `__repr__` hides the token, relative paths resolve against the project root, non-loopback `COMFYUI_HOST` is refused. |
-| Path safety | `app/utils/paths.py` | Done. `sanitize_name` / `safe_join` / `assert_within`. Traversal, separators, NUL bytes, and Windows reserved device names all neutralised. |
-| Structured logging | `app/utils/logging.py` | Done. Console + rotating JSON file (5 MB x 5). Central redaction of secret-shaped keys and of anything matching a bot-token pattern. |
-| ComfyUI client | `app/comfy/client.py` | Done. Verified against the live instance: status, submit, history polling, WS progress, streamed download. |
-| ComfyUI error taxonomy | `app/comfy/errors.py` | Done. Each error carries a safe `user_message`; detail stays in logs. |
-| Workflow registry | `app/workflows/registry.py` | Done. Loads `<id>.api.json` + `<id>.meta.json`, validates every mapping against the real graph, coerces/clamps/snaps values. |
+| `txt2img_h3_plate` | text → image | captured from history `f813cb25`, verified success |
+| `img2img_h3` | image + text → image | the above plus `LoadImage → ImageScale → first_frame` |
+| `txt2video_h3` | text → video+audio | captured from history `eeb409b9`, input-image branch removed |
+| `img2video_h3` | image + text → video+audio | `eeb409b9` verbatim |
 
-| SQLite layer | `app/database/connection.py` | Done. WAL, foreign keys on, `PRAGMA user_version` migrations, refuses a database written by a newer schema. |
-| Job model + state machine | `app/jobs/models.py` | Done. 7 states with an explicit legal-transition table. |
-| Job repository | `app/jobs/repository.py` | Done. Ownership-scoped queries, guarded transitions, FIFO queue, quota counting. |
-| GPU queue worker | `app/orchestrator/worker.py` | Done. Strictly one job at a time; survives a failing notifier, a bad workflow, and ComfyUI going away. |
-| Startup recovery | `app/orchestrator/recovery.py` | Done. Reconciles interrupted jobs without duplicating GPU work. |
-| Notifier protocol | `app/orchestrator/notifier.py` | Done. Keeps Telegram out of the worker. |
+**Templates are captured from ComfyUI's own execution history, never authored by hand.**
+`/history` returns the exact API graph of every run including whether it succeeded, so a
+capture is known to execute here. See `docs/decisions.md` D1.
 
-| Users, roles, quotas | `app/users/` | Done. Identity is the numeric Telegram id only. v0.1 authorises from `ADMIN_TELEGRAM_IDS`; Phase 3 swaps `UserService._lookup` for a DB query and nothing else changes. |
-| Orchestrator | `app/orchestrator/service.py` | Done. The single gate: authorise → quota → workflow → validate → create → queue. |
-| Telegram notifier | `app/bot/notifier.py` | Done. Never raises; falls back from photo to document, and retries unthreaded if the reply target is gone. |
-| Telegram handlers | `app/bot/handlers.py` | Done. `/start /help /generate /status /queue /history /cancel /workflows`, plus plain text as a prompt. |
-| Application wiring | `app/bot/application.py`, `run_bot.py` | Done. Verified to build, gate, and query live ComfyUI with a fake token. |
-
-**v0.1 is code complete.** Everything that can be verified without a Telegram token has
-been. What remains is section C of `docs/integration-test.md` — the live round trip.
-
-### Measured generation performance (real run, 2026-08-22)
-
-`python scripts/verify_generation.py` — full chain registry → ComfyUI → local PNG, **PASS**.
-
-| Measure | Value |
-|---|---|
-| Total wall time | **122 s** at `length=5`, 608x1088, 12 steps |
-| Text encoder load | ~56 s (first ~56 s before sampling starts) |
-| Sampling | ~37 s (12 steps, ~1.7 s/step) |
-| VAE decode + save | ~26 s |
-| Outputs | **5 PNGs**, ~875 KB each |
-| Image quality | Good — strong prompt adherence |
-
-**Implication for the bot**: `length=5` yields 5 *consecutive frames of one clip*, so they
-are near-identical. Deliver **one** to Telegram and keep the rest on disk. Do not send five
-near-duplicates.
-
-**Implication for timeouts and UX**: ~2 minutes per request means the user must get an
-immediate acknowledgement and a progress update, never a silent wait. `JOB_TIMEOUT_SECONDS`
-of 1800 is comfortable.
-
-### Design points worth knowing
-- **Completion is decided by polling `/history`**, not by the WebSocket. The socket only
-  feeds progress updates and its failure is non-fatal. A ComfyUI restart mid-job is
-  tolerated for ~5 poll cycles before the job is failed.
-- **`filename_prefix` is a `managed` parameter** — declared in the workflow metadata but
-  excluded from `user_parameters`, so a request cannot reach it. Only the orchestrator
-  passes it, via `build(..., managed={...})`.
-- **Out-of-range numbers are clamped and snapped to the node's grid** rather than
-  rejected, so ComfyUI never receives an off-grid value. Wrong *types*, unknown
-  parameters, and overlong strings are rejected outright.
-- **Client is verified against the real instance**: downloaded an actual 824 KB PNG
-  through `/view`, and confirmed a dead port yields `ComfyUnavailable` with the safe
-  message "The image generator is offline right now."
+Only inputs declared in `.meta.json` are ever substituted. A parameter may declare
+multiple `targets` — `width` drives both the generation *and* the input-image scaler,
+which must not be allowed to drift apart.
 
 ---
 
-## Open questions — BLOCKING the live test
+## Bugs found and fixed (do not reintroduce)
 
-1. **Telegram bot token** — owner is creating it. Needed in `.env` as `TELEGRAM_BOT_TOKEN`.
-2. **Owner's numeric Telegram user ID** — needed as `ADMIN_TELEGRAM_IDS`. From `@userinfobot`.
-3. ~~Image strategy~~ — **DECIDED 2026-08-22**: use the H3 stack as-is. An SDXL/Flux
-   workflow can be added later as another template; the registry supports it with no
-   code change.
-4. ~~Unverified `length=5` path~~ — **VERIFIED 2026-08-22**, see the measured numbers below.
+1. **`PREPARING` could not return to `QUEUED`** — recovery silently failed to requeue an
+   unsubmitted job. `GENERATING → QUEUED` is now explicitly *illegal*; that is the one
+   that would duplicate GPU work.
+2. **A single admin id crashed startup** — pydantic-settings JSON-decodes complex fields,
+   so `ADMIN_TELEGRAM_IDS=12345` arrived as an `int` while `111,222` arrived as a `str`.
+   The field is now a plain string parsed by the model.
+3. **Declared defaults were decorative** — `build()` only substituted values passed in, so
+   the captured template's `length=73` won every time. Every one-image request rendered 73
+   frames and took 218s instead of ~122s.
+4. **The seed never changed** — baked at `20250822`, so the same prompt returned a
+   byte-identical image forever. Now rolled per job and recorded.
+5. **Photos did nothing** — only `filters.TEXT` was registered, and a Telegram photo
+   carries a *caption*, not text. Silent no-op with no log line.
+6. **Cancelling a queued job did nothing** — it set the flag, the worker skipped the job,
+   and nothing ever moved it. It sat in `queued` for good, still counted as active.
+7. **A restart orphaned an in-flight job** — recovery rightly refused to resubmit, but
+   nothing picked it back up. The worker now adopts `GENERATING` jobs and resumes waiting.
+8. **Recovered results were never delivered** — recovery downloaded the file, marked the
+   job complete, and stopped. From the user's side the request simply vanished.
+
+A **secret leak** also happened: a real bot token was pasted into `.env.example` (a
+tracked file) and swept into two commits by `git add -A`. The token has been revoked, and
+`scripts/check_secrets.py` now runs as a pre-commit hook. The old value remains in commits
+`d8287f0`/`551531c` by the owner's deliberate choice — it is revoked and the repo has no
+remote, so it is not an outstanding risk.
 
 ---
 
-## Security posture (current)
-- ComfyUI on loopback only — verified via `argv`, no `--listen` flag.
-- No secrets exist yet. `.env.example` holds placeholders only; `.env` is gitignored.
-- No public tunnel, webhook, or port forward. Telegram will use **long polling**.
-- Nothing has been committed to git (repo not initialised).
+## Known gaps / next steps
+
+Ranked by what daily use has exposed, not by the original phase order.
+
+1. **Effective parameters are not recorded.** Jobs show `params {}` because only values
+   explicitly passed in get stored — defaults applied inside `build()` do not. The
+   database therefore cannot say what size or length actually ran, and a result is not
+   reliably reproducible. **Fix this before building on top of it.**
+2. **Inline buttons** — Regenerate / Animate this / Variations under each result. Kills
+   the retype-and-reupload loop. The ownership scoping it needs is already built and tested.
+3. **Frame interpolation** — `film_net_fp16.safetensors` is installed and unused. Doubles
+   video smoothness or length for a fraction of what sampling those frames costs.
+4. **`steps=12` on images may waste a third of sampling.** The turbo LoRA is an 8-step
+   LoRA and the video graphs use 8. Worth an A/B at the same seed.
+5. **Only portrait.** Everything is centre-cropped to 768×1024 or 608×1088. Orientation
+   presets would stop landscape sources losing their sides.
+6. **Draft mode** — generate at ~448×768 while iterating, full size for keepers.
+7. **Queue ordering by loaded workflow** — would avoid model reloads, at the cost of
+   strict FIFO fairness. Owner's call.
+8. Phase 3 proper (DB users, invites, admin commands), Phase 4 (MCP), Phase 5 (Claude).
+9. An upscale model (~64 MB); `upscale_models/` is empty.
+10. Retention — outputs only grow. Job 1 alone left 73 PNGs.
 
 ---
 
-## Bugs found and fixed during development
-Both were found by tests or a wiring check, not in production — worth recording so they
-are not reintroduced.
+## Operating it
 
-1. **`PREPARING` could not return to `QUEUED`.** Startup recovery silently failed to
-   requeue a job that had never been submitted, because the transition was missing from
-   the state machine and the `except` branch swallowed it. `PREPARING → QUEUED` is now
-   legal, `GENERATING → QUEUED` is now explicitly illegal (that is the one that would
-   duplicate GPU work), and the branch logs instead of returning quietly.
-2. **A single admin id crashed startup.** `pydantic-settings` JSON-parses env values for
-   complex types, so `ADMIN_TELEGRAM_IDS=12345` arrived as an `int` while `111,222`
-   arrived as a `str`. The validator only handled strings — meaning the single-admin
-   case, the most likely real configuration, failed. It now accepts int, str, list, and
-   tuple, and rejects non-numeric input with a message naming @userinfobot.
+```powershell
+cd d:\Rey_August\BuatinDong
+.\.venv\Scripts\Activate.ps1
+python run_bot.py            # Ctrl+C stops cleanly
+python scripts/audit_env.py  # read-only machine check
+python -m pytest             # 311 tests, no GPU or network needed
+```
 
-## Next concrete action
-1. Owner fills `.env` with the bot token and their numeric Telegram id.
-2. Run `python run_bot.py` and work through **section C** of
-   [docs/integration-test.md](docs/integration-test.md) — the live round trip, queueing,
-   cancellation, and the unauthorised-user rejection.
-3. Record the result in this file.
-4. Then Phase 3 proper (DB-backed users, invites, admin commands) or Phase 4 (MCP),
-   depending on whether friends need access before Claude interpretation does.
+VS Code: **Run & Debug → "Run bot"**, or **Tasks → "Start bot"**. The dashboard is at
+`http://127.0.0.1:8765` while it runs.
 
-## Deliberately NOT done yet
-Docker, Redis, Celery, PostgreSQL, cloud anything, MCP server, Claude routing, inline
-buttons, video jobs, retention/cleanup. All are later phases or explicitly out of scope.
+A clean Ctrl+C finishes the current step; anything mid-generation is adopted and delivered
+on the next start.
+
+---
+
+## Security posture
+
+- ComfyUI on loopback (verified via `argv`, no `--listen`); the dashboard binds to
+  loopback and refuses any other host at startup; Telegram uses **long polling** — no
+  webhook, no tunnel, no forwarded port, nothing inbound.
+- Identity is the **numeric** Telegram id. Usernames are display metadata only.
+- Uploads are validated by their leading bytes, not by filename or the MIME type Telegram
+  reports; a renamed executable is refused before touching disk.
+- Stored filenames are built from job and owner ids only — user text never reaches a path.
+- Errors shown to users carry no paths, stack traces, or internal ids; detail stays in
+  `logs/`. Secrets are redacted centrally before anything is written.
+- `.env` is gitignored and a pre-commit secret scan is installed.
