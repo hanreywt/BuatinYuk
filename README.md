@@ -23,6 +23,10 @@ machine. ComfyUI stays bound to `127.0.0.1`. Nothing is exposed publicly.
 
 ---
 
+> **Setting this up for the first time, or sending it to a friend?**
+> Read **[SETUP.md](SETUP.md)** instead — it is written for someone who has never seen
+> the project, and covers both using someone else's bot and running your own.
+
 ## Prerequisites
 
 | Requirement | This machine |
