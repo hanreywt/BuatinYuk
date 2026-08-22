@@ -51,13 +51,39 @@ class ParameterError(WorkflowError):
 _ALLOWED_TYPES = {"string", "int", "float"}
 
 
+def _parse_targets(name: str, raw: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    """Accept `node`+`input` for the common single-target case, or a `targets` list."""
+    if raw.get("targets"):
+        entries = raw["targets"]
+        if not isinstance(entries, list) or not entries:
+            raise WorkflowDefinitionError(f"parameter {name!r} has a malformed 'targets'")
+        parsed: list[tuple[str, str]] = []
+        for entry in entries:
+            if not isinstance(entry, dict) or not entry.get("node") or not entry.get("input"):
+                raise WorkflowDefinitionError(
+                    f"parameter {name!r} has a target missing 'node' or 'input'"
+                )
+            parsed.append((str(entry["node"]), str(entry["input"])))
+        return tuple(parsed)
+
+    for required_key in ("node", "input"):
+        if not raw.get(required_key):
+            raise WorkflowDefinitionError(f"parameter {name!r} is missing {required_key!r}")
+    return ((str(raw["node"]), str(raw["input"])),)
+
+
 @dataclass(frozen=True, slots=True)
 class ParameterSpec:
-    """One editable input, resolved to a concrete node and field in the graph."""
+    """One editable setting, resolved to one or more concrete inputs in the graph.
+
+    A single setting sometimes has to drive several nodes at once. In the img2img
+    graph the generation width must also be the width the input image is scaled to;
+    letting those two drift apart would produce a mismatch at run time. Declaring
+    both targets under one name keeps them in step by construction.
+    """
 
     name: str
-    node: str
-    input: str
+    targets: tuple[tuple[str, str], ...]  # (node id, input name)
     type: str
     required: bool = False
     managed: bool = False  # set by the orchestrator only; never accepted from a request
@@ -76,14 +102,12 @@ class ParameterSpec:
                 f"parameter {name!r} has unsupported type {kind!r}; "
                 f"expected one of {sorted(_ALLOWED_TYPES)}"
             )
-        for required_key in ("node", "input"):
-            if not raw.get(required_key):
-                raise WorkflowDefinitionError(f"parameter {name!r} is missing {required_key!r}")
+
+        targets = _parse_targets(name, raw)
 
         return cls(
             name=name,
-            node=str(raw["node"]),
-            input=str(raw["input"]),
+            targets=targets,
             type=kind,
             required=bool(raw.get("required", False)),
             managed=bool(raw.get("managed", False)),
@@ -176,8 +200,8 @@ class WorkflowSpec:
             resolved[name] = _coerce(spec, raw_value)
 
         for name, value in resolved.items():
-            spec = self.parameters[name]
-            graph[spec.node]["inputs"][spec.input] = value
+            for node_id, input_name in self.parameters[name].targets:
+                graph[node_id]["inputs"][input_name] = value
 
         log.debug(
             "workflow.built",
@@ -265,17 +289,18 @@ def _load_workflow(meta_path: Path) -> WorkflowSpec:
     # Every mapping must point at something that actually exists. This is what catches
     # a workflow re-export that renamed or renumbered a node.
     for spec in parameters.values():
-        node = graph.get(spec.node)
-        if node is None:
-            raise WorkflowDefinitionError(
-                f"{workflow_id}: parameter {spec.name!r} targets node {spec.node!r}, "
-                "which is not in the graph"
-            )
-        if spec.input not in (node.get("inputs") or {}):
-            raise WorkflowDefinitionError(
-                f"{workflow_id}: parameter {spec.name!r} targets input {spec.input!r} on "
-                f"node {spec.node} ({node.get('class_type')}), which has no such input"
-            )
+        for node_id, input_name in spec.targets:
+            node = graph.get(node_id)
+            if node is None:
+                raise WorkflowDefinitionError(
+                    f"{workflow_id}: parameter {spec.name!r} targets node {node_id!r}, "
+                    "which is not in the graph"
+                )
+            if input_name not in (node.get("inputs") or {}):
+                raise WorkflowDefinitionError(
+                    f"{workflow_id}: parameter {spec.name!r} targets input {input_name!r} on "
+                    f"node {node_id} ({node.get('class_type')}), which has no such input"
+                )
 
     return WorkflowSpec(
         workflow_id=workflow_id,

@@ -218,6 +218,36 @@ class ComfyUIClient:
         except Exception as exc:  # noqa: BLE001 - progress is optional by design
             log.debug("comfy.ws.unavailable", prompt_id=prompt_id, error=str(exc))
 
+    async def upload_image(self, data: bytes, filename: str) -> str:
+        """Put an image into ComfyUI's input directory and return the name to
+        reference from a LoadImage node.
+
+        `filename` must already be sanitised by the caller; ComfyUI writes it to disk.
+        """
+        files = {"image": (filename, data, "application/octet-stream")}
+        try:
+            response = await self._http.post(
+                "/upload/image", files=files, data={"overwrite": "true"}
+            )
+        except httpx.RequestError as exc:
+            raise ComfyUnavailable(f"upload failed: {exc}") from exc
+
+        if response.status_code >= 400:
+            raise ComfyRejectedWorkflow(
+                f"ComfyUI rejected the upload: HTTP {response.status_code} "
+                f"{response.text[:200]}"
+            )
+
+        body = response.json()
+        name = body.get("name")
+        if not name:
+            raise ComfyRejectedWorkflow("ComfyUI accepted the upload but returned no name")
+
+        subfolder = body.get("subfolder") or ""
+        reference = f"{subfolder}/{name}" if subfolder else name
+        log.info("comfy.uploaded", filename=name, bytes=len(data))
+        return reference
+
     # ---------------- results ----------------
 
     async def download(self, ref: OutputRef, destination: Path) -> Path:

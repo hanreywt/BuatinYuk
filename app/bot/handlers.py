@@ -18,6 +18,7 @@ from telegram.ext import ContextTypes
 from app.comfy.errors import ComfyError
 from app.jobs.models import JobStatus
 from app.orchestrator.service import GenerationRequest, Orchestrator
+from app.services.uploads import UploadRejected
 from app.users.service import AuthorizationError
 from app.utils.logging import get_logger
 from app.workflows.registry import WorkflowError
@@ -28,6 +29,7 @@ HELP_TEXT = """\
 *Generation*
 `/generate <description>` - generate an image
 Or just send a message describing what you want.
+Send a *photo with a caption* to generate from that image.
 
 *Your jobs*
 `/status [job id]` - system status, or one job
@@ -43,6 +45,9 @@ Generation takes roughly two minutes. You will get the image when it is done.
 """
 
 GENERIC_ERROR = "Something went wrong handling that. Please try again."
+
+#: Telegram's own ceiling for what a bot may download.
+MAX_TELEGRAM_DOWNLOAD = 20 * 1024 * 1024
 
 
 def _orchestrator(context: ContextTypes.DEFAULT_TYPE) -> Orchestrator:
@@ -66,7 +71,7 @@ def _handle_errors(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             await func(update, context)
-        except (AuthorizationError, WorkflowError, ComfyError) as exc:
+        except (AuthorizationError, WorkflowError, ComfyError, UploadRejected) as exc:
             log.info(
                 "bot.refused",
                 handler=func.__name__,
@@ -138,7 +143,12 @@ async def freeform(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _submit(update, context, message.text)
 
 
-async def _submit(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str) -> None:
+async def _submit(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    prompt: str,
+    image: bytes | None = None,
+) -> None:
     message = update.effective_message
     accepted = await _orchestrator(context).submit(
         GenerationRequest(
@@ -146,9 +156,80 @@ async def _submit(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: st
             telegram_chat_id=message.chat_id,
             telegram_message_id=message.message_id,
             text=prompt,
+            image=image,
         )
     )
     await _reply(update, accepted.describe())
+
+
+@_handle_errors
+async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A photo, or an image sent as a file, plus its caption.
+
+    Telegram delivers the picture and its caption as one message, so "image and
+    prompt" is a single natural send. The caption is required: the model still needs
+    a text prompt, and guessing one for the user would produce something arbitrary.
+    """
+    message = update.effective_message
+    if message is None:
+        return
+
+    caption = (message.caption or "").strip()
+    if not caption:
+        await _reply(
+            update,
+            "Add a caption describing what you want, then send the image again.\n"
+            'For example: "make this cinematic, neon at night"',
+        )
+        return
+
+    data = await _download_image(message)
+    if data is None:
+        await _reply(update, "I could not read that as an image. Send a PNG or a JPEG.")
+        return
+
+    await _submit(update, context, caption, image=data)
+
+
+async def _download_image(message) -> bytes | None:
+    """Fetch the image bytes from Telegram.
+
+    A photo is offered in several sizes; the last is the largest. An image sent as a
+    file arrives as a document instead, which keeps its original quality - better
+    input for generation, so both are accepted.
+    """
+    source = None
+    if message.photo:
+        source = message.photo[-1]
+    elif message.document and (message.document.mime_type or "").startswith("image/"):
+        source = message.document
+
+    if source is None:
+        return None
+
+    if getattr(source, "file_size", None) and source.file_size > MAX_TELEGRAM_DOWNLOAD:
+        raise UploadRejected(
+            f"telegram file of {source.file_size} bytes is too large",
+            f"That image is too large (limit {MAX_TELEGRAM_DOWNLOAD // (1024 * 1024)} MB).",
+        )
+
+    handle = await source.get_file()
+    return bytes(await handle.download_as_bytearray())
+
+
+@_handle_errors
+async def unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Anything the bot cannot act on - a sticker, a voice note, a video.
+
+    Silence is the worst answer here: a user cannot tell an unsupported message from a
+    broken bot. Confirming what is supported costs one line.
+    """
+    _orchestrator(context).users.authorise(update.effective_user.id)
+    await _reply(
+        update,
+        "I can work with text, or a photo with a caption. "
+        "Send a description of what you want, or an image and what to do with it.",
+    )
 
 
 # ---------------- queries ----------------

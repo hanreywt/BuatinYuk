@@ -17,6 +17,10 @@ data/*
 outputs/*
 !outputs/.gitkeep
 
+# --- images sent by users ---
+inputs/*
+!inputs/.gitkeep
+
 # --- logs ---
 logs/*
 !logs/.gitkeep

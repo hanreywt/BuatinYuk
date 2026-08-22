@@ -34,6 +34,7 @@ from app.jobs.repository import JobRepository
 from app.orchestrator.recovery import RecoveryService
 from app.orchestrator.service import Orchestrator
 from app.orchestrator.worker import GenerationWorker
+from app.services.uploads import UploadService
 from app.users.service import UserService
 from app.utils.logging import get_logger
 from app.workflows.registry import WorkflowRegistry
@@ -102,6 +103,8 @@ class GenerationServer:
             worker=self._worker,
             comfy=self._comfy,
             default_workflow=settings.default_workflow,
+            uploads=UploadService(comfy=self._comfy, input_dir=settings.input_dir),
+            image_workflow=settings.image_workflow,
         )
         application.bot_data["jobs"] = jobs
         application.bot_data["settings"] = settings
@@ -172,10 +175,18 @@ def _register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("cancel", handlers.cancel))
     application.add_handler(CommandHandler("workflows", handlers.workflows))
 
+    # A photo, or an image sent as a file, with its caption as the prompt.
+    application.add_handler(
+        MessageHandler(filters.PHOTO | filters.Document.IMAGE, handlers.photo)
+    )
+
     # Anything else that is plain text becomes a generation request.
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.freeform)
     )
+
+    # Anything left over gets an explanation rather than silence.
+    application.add_handler(MessageHandler(~filters.COMMAND, handlers.unsupported))
 
 
 async def _on_error(update: object, context: Any) -> None:

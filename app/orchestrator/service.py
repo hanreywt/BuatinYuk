@@ -24,6 +24,7 @@ from app.orchestrator.worker import GenerationWorker
 from app.users.models import User
 from app.users.service import UserService
 from app.utils.logging import get_logger
+from app.services.uploads import UploadRejected, UploadService
 from app.workflows.registry import ParameterError, WorkflowRegistry, WorkflowSpec
 
 log = get_logger(__name__)
@@ -41,6 +42,8 @@ class GenerationRequest:
     telegram_message_id: int | None = None
     workflow_id: str | None = None  # None means the configured default
     parameters: dict[str, Any] = field(default_factory=dict)
+    #: Raw bytes of an input image, if the user sent one. Validated before use.
+    image: bytes | None = None
 
 
 @dataclass(slots=True)
@@ -96,6 +99,8 @@ class Orchestrator:
         worker: GenerationWorker,
         comfy: ComfyUIClient,
         default_workflow: str,
+        uploads: UploadService | None = None,
+        image_workflow: str = "img2img_h3",
     ) -> None:
         self._users = users
         self._jobs = jobs
@@ -103,6 +108,8 @@ class Orchestrator:
         self._worker = worker
         self._comfy = comfy
         self._default_workflow = default_workflow
+        self._uploads = uploads
+        self._image_workflow = image_workflow
 
     # ---------------- submission ----------------
 
@@ -111,7 +118,9 @@ class Orchestrator:
         user = self._users.authorise(request.telegram_user_id)
         self._users.check_quota(user)
 
-        workflow = self._resolve_workflow(request.workflow_id)
+        workflow = self._resolve_workflow(
+            request.workflow_id or (self._image_workflow if request.image else None)
+        )
         text = self._clean_text(request.text)
 
         parameters = {"prompt": text, **request.parameters}
@@ -120,9 +129,26 @@ class Orchestrator:
         # the caller asked for a specific seed.
         if "seed" in workflow.user_parameters and "seed" not in parameters:
             parameters["seed"] = secrets.randbelow(2**32)
+        managed_probe: dict[str, Any] = {"filename_prefix": "validation_probe"}
+        if request.image is not None:
+            if self._uploads is None:
+                raise ParameterError(
+                    "image submitted but no upload service is configured",
+                    user_message="Images are not supported on this server.",
+                )
+            if "image" not in workflow.parameters:
+                raise ParameterError(
+                    f"workflow {workflow.workflow_id} takes no input image",
+                    user_message="That workflow does not accept an image.",
+                )
+            # Check size and format before a job record exists, so a bad file costs
+            # the user nothing and leaves nothing behind.
+            self._uploads.validate(request.image)
+            managed_probe["image"] = "probe.png"
+
         # Validate now, so a bad request is refused at submit time with a useful
         # message rather than failing two minutes later in the worker.
-        workflow.build(parameters, managed={"filename_prefix": "validation_probe"})
+        workflow.build(parameters, managed=managed_probe)
 
         job = await asyncio.to_thread(
             self._jobs.create,
@@ -135,6 +161,16 @@ class Orchestrator:
                 parameters=parameters,
             ),
         )
+        if request.image is not None:
+            stored = await self._uploads.store(
+                request.image,
+                owner_id=request.telegram_user_id,
+                job_reference=job.output_prefix(),
+            )
+            parameters["image"] = stored.comfy_reference
+            await asyncio.to_thread(self._jobs.set_parameters, job.id, parameters)
+            job.parameters = parameters
+
         job = await asyncio.to_thread(self._jobs.transition, job.id, JobStatus.QUEUED)
 
         position = await asyncio.to_thread(self._jobs.queue_position, job.id)

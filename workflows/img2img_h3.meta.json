@@ -1,0 +1,64 @@
+{
+  "workflow_id": "img2img_h3",
+  "display_name": "Image + prompt (MiniMax H3)",
+  "description": "Takes an input image as the first frame and a text prompt, then generates frames from it. Send a photo with a caption.",
+  "graph_file": "img2img_h3.api.json",
+  "task": "img2img",
+  "output_type": "image",
+  "resource_intensity": "high",
+  "provenance": {
+    "source": "txt2img_h3_plate plus the first_frame chain used by the Rey_BuNad_* workflows",
+    "base_prompt_id": "f813cb25-1be7-4a27-b89a-69c56eeb110d",
+    "note": "The 13 base nodes are unchanged from the verified txt2img capture. Nodes 14 (LoadImage) and 15 (ImageScale) were added, and node 1's optional first_frame input wired to them, mirroring the wiring in the user's own image-conditioned workflows."
+  },
+  "parameters": {
+    "prompt": {
+      "node": "1", "input": "prompt", "type": "string",
+      "required": true, "max_length": 2000
+    },
+    "width": {
+      "targets": [
+        { "node": "1", "input": "width" },
+        { "node": "15", "input": "width" }
+      ],
+      "type": "int", "default": 608, "min": 256, "max": 1344, "step": 32,
+      "note": "Drives both the generation width and the size the input image is scaled to; they must match."
+    },
+    "height": {
+      "targets": [
+        { "node": "1", "input": "height" },
+        { "node": "15", "input": "height" }
+      ],
+      "type": "int", "default": 1088, "min": 256, "max": 1344, "step": 32,
+      "note": "Drives both the generation height and the input image scale height."
+    },
+    "length": {
+      "node": "1", "input": "length", "type": "int",
+      "default": 5, "min": 5, "max": 124, "step": 17,
+      "note": "Frames generated. 5 for a single still; higher values animate away from the input image."
+    },
+    "seed": {
+      "node": "7", "input": "noise_seed", "type": "int",
+      "min": 0, "max": 4294967295
+    },
+    "steps": {
+      "node": "9", "input": "steps", "type": "int",
+      "default": 12, "min": 4, "max": 30
+    },
+    "image": {
+      "node": "14", "input": "image", "type": "string", "managed": true,
+      "max_length": 260,
+      "note": "The uploaded file's name inside ComfyUI's input directory. Set by the orchestrator after a validated upload - never taken from user input."
+    },
+    "filename_prefix": {
+      "node": "13", "input": "filename_prefix", "type": "string", "managed": true,
+      "note": "Set by the orchestrator per job. Never taken from user input."
+    }
+  },
+  "unsupported": {
+    "negative_prompt": "MiniMaxH3ImageToVideo exposes no negative conditioning input.",
+    "cfg": "This graph uses BasicGuider (no CFG scale input).",
+    "denoise_strength": "The node takes a first frame rather than a denoise ratio, so the input image is a starting frame, not a partially-noised latent.",
+    "model_choice": "Only one diffusion model is installed."
+  }
+}

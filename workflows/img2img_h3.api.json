@@ -1,0 +1,169 @@
+{
+  "1": {
+    "class_type": "MiniMaxH3ImageToVideo",
+    "inputs": {
+      "prompt": "Environment: an ancient, crumbling stone temple ruin at night - moss-covered broken pillars, weathered archways, a cracked stone floor, low fog rolling across the ground, distant fractured silhouettes under a dim moonlit sky, warm gold rim light and floating golden dust particles.\n\nEmpty establishing shot of this ruin with no people, no characters, no figures, no animals and no text anywhere in frame. Vertical portrait composition. The camera is locked to a wide view looking into the ruin: two rows of broken mossy pillars receding into the fog, a large weathered archway standing behind them, the cracked stone floor filling the lower third with a clear flat area of ground in the centre foreground where someone could stand. The moon sits high and slightly to the left, casting cool blue light, while warm gold light glows from deeper inside the ruin. Ankle-height fog rolls slowly across the floor and fine golden dust drifts upward through the beams of light.\n\nNon-photorealistic painterly digital illustration, in the visual style of a stylized tactical-shooter game cinematic: painted brushwork texture, bold graphic shapes, dramatic painted lighting rather than raytraced realism, rich darks, cool blue moonlight against warm gold accents.\n\nThe camera barely moves, only a slow gentle drift, so the architecture stays clear and stable. Nothing enters or leaves the frame. The ruin, the pillar positions, the archway and the moon stay exactly the same throughout.\nAudio: quiet night wind through stone, distant dripping water, a low ambient drone.",
+      "width": 608,
+      "height": 1088,
+      "length": 73,
+      "clip": [
+        "2",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "first_frame": [
+        "15",
+        0
+      ]
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+      "type": "minimax"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "5": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "strength_model": 1.0,
+      "model": [
+        "4",
+        0
+      ]
+    }
+  },
+  "6": {
+    "class_type": "MiniMaxH3SigmaShift",
+    "inputs": {
+      "shift_video": 11.0,
+      "shift_audio": 3.0,
+      "model": [
+        "5",
+        0
+      ]
+    }
+  },
+  "7": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 20250822
+    }
+  },
+  "8": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "res_multistep"
+    }
+  },
+  "9": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "scheduler": "simple",
+      "steps": 12,
+      "denoise": 1.0,
+      "model": [
+        "6",
+        0
+      ]
+    }
+  },
+  "10": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": [
+        "6",
+        0
+      ],
+      "conditioning": [
+        "1",
+        0
+      ]
+    }
+  },
+  "11": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "7",
+        0
+      ],
+      "guider": [
+        "10",
+        0
+      ],
+      "sampler": [
+        "8",
+        0
+      ],
+      "sigmas": [
+        "9",
+        0
+      ],
+      "latent_image": [
+        "1",
+        1
+      ]
+    }
+  },
+  "12": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "11",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "13": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "img2img",
+      "images": [
+        "12",
+        0
+      ]
+    }
+  },
+  "14": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "placeholder.png"
+    }
+  },
+  "15": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "14",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 608,
+      "height": 1088,
+      "crop": "center"
+    }
+  }
+}

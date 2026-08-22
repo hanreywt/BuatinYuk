@@ -159,6 +159,7 @@ python -m pytest                    # 207 tests, no GPU or network needed
 | `/help` | Command list |
 | `/generate <text>` | Generates an image |
 | *(plain message)* | Same as `/generate` |
+| *(photo + caption)* | Generates from that image, using the caption as the prompt |
 | `/status` | System status; `/status <id>` for one job |
 | `/queue` | What is waiting or running |
 | `/history` | Your recent jobs |

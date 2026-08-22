@@ -50,10 +50,15 @@ class Settings(BaseSettings):
     database_path: Path = Path("data/app.db")
     workflow_dir: Path = Path("workflows")
     output_dir: Path = Path("outputs")
+    #: Where images sent by users are kept. Separate from ComfyUI's own input folder so
+    #: an upload is always attributable to the job and owner that produced it.
+    input_dir: Path = Path("inputs")
     log_dir: Path = Path("logs")
 
     # ---------- Generation ----------
     default_workflow: str = "txt2img_h3_plate"
+    #: Used when the request carries an image instead of text alone.
+    image_workflow: str = "img2img_h3"
     default_daily_quota: int = Field(default=10, ge=0)
     job_timeout_seconds: int = Field(default=1800, ge=30)
 
@@ -105,7 +110,7 @@ class Settings(BaseSettings):
         self._admin_ids = ids
         return self
 
-    @field_validator("database_path", "workflow_dir", "output_dir", "log_dir")
+    @field_validator("database_path", "workflow_dir", "output_dir", "input_dir", "log_dir")
     @classmethod
     def _resolve_local(cls, value: Path) -> Path:
         """Relative paths are interpreted against the project root, not the cwd."""
@@ -141,7 +146,7 @@ class Settings(BaseSettings):
 
     def ensure_directories(self) -> None:
         """Create the local directories this application owns. Never touches ComfyUI's."""
-        for path in (self.output_dir, self.log_dir, self.database_path.parent):
+        for path in (self.output_dir, self.input_dir, self.log_dir, self.database_path.parent):
             path.mkdir(parents=True, exist_ok=True)
 
     def __repr__(self) -> str:  # keep secrets out of tracebacks and reprs

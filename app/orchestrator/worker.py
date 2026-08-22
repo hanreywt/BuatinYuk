@@ -180,15 +180,31 @@ class GenerationWorker:
 
     async def _build_graph(self, job: Job) -> dict:
         workflow = self._registry.get(job.workflow_id)
-        graph = workflow.build(
-            job.parameters, managed={"filename_prefix": job.output_prefix()}
-        )
+
+        # A stored job mixes user settings with orchestrator-managed ones such as the
+        # uploaded image reference. Split them back apart, because build() refuses a
+        # managed name arriving as an ordinary parameter - which is exactly the check
+        # that stops a request from setting one.
+        managed: dict[str, object] = {"filename_prefix": job.output_prefix()}
+        user_params: dict[str, object] = {}
+        for name, value in job.parameters.items():
+            spec = workflow.parameters.get(name)
+            if spec is not None and spec.managed:
+                managed[name] = value
+            else:
+                user_params[name] = value
+
+        graph = workflow.build(user_params, managed=managed)
         # Record exactly what was sent, after clamping and snapping.
         applied = {
-            name: graph[spec.node]["inputs"][spec.input]
+            name: graph[spec.targets[0][0]]["inputs"][spec.targets[0][1]]
             for name, spec in workflow.user_parameters.items()
             if name in job.parameters
         }
+        # Keep managed values (such as the uploaded image) in the record too, so the
+        # job stays a complete account of what ran.
+        applied.update({name: value for name, value in managed.items()
+                        if name != "filename_prefix"})
         await asyncio.to_thread(self._repo.set_parameters, job.id, applied)
         job.parameters = applied
         return graph
