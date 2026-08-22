@@ -244,7 +244,8 @@ cd BuatinDong
 claude
 ```
 
-It reads the project on its own. Ask in plain language:
+It reads the project on its own — `CLAUDE.md` tells it the architecture and the rules
+that matter before you ask anything. Then ask in plain language:
 
 ```
 read PROJECT_STATUS.md and tell me what this project does
@@ -255,6 +256,17 @@ run the tests
 
 Type `/exit` to leave. It asks before changing files or running commands — read what it
 proposes rather than approving blindly.
+
+### One thing to do first
+
+Git hooks are not included in a clone, so install the credential guard once:
+
+```bash
+python scripts/check_secrets.py --install
+```
+
+That blocks any commit containing a token or key. It is the mistake that has already
+happened once on this project.
 
 ### Start here
 

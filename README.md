@@ -233,8 +233,11 @@ cd BuatinDong
 claude
 ```
 
-Start with `read PROJECT_STATUS.md and tell me what to work on next` — that file is the
-handover document and is kept current. Run `python -m pytest` after any change.
+`CLAUDE.md` orients it automatically. Start with
+`read PROJECT_STATUS.md and tell me what to work on next` — that file is the handover
+document and is kept current. Run `python -m pytest` after any change.
+
+Install the credential guard once per clone: `python scripts/check_secrets.py --install`
 
 Full instructions, written for someone new, are in [SETUP.md](SETUP.md).
 
