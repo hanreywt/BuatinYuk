@@ -297,17 +297,16 @@ async def test_cancel_only_interrupts_when_that_job_holds_the_gpu(
     orchestrator, repo
 ) -> None:
     """Interrupting ComfyUI for a queued job would kill somebody else's generation."""
-    accepted = await orchestrator.submit(request(ADMIN))
+    waiting = await orchestrator.submit(request(ADMIN))
+    running = await orchestrator.submit(request(ADMIN))
     comfy = orchestrator._comfy
 
-    await orchestrator.cancel(accepted.job.id, ADMIN)
-    assert comfy.interrupted == 0  # it was only queued
+    await orchestrator.cancel(waiting.job.id, ADMIN)
+    assert comfy.interrupted == 0  # it was only queued, so nothing was running it
 
-    orchestrator._worker.current_job_id = accepted.job.id
-    second = await orchestrator.submit(request(ADMIN))
-    await orchestrator.cancel(accepted.job.id, ADMIN)
+    orchestrator._worker.current_job_id = running.job.id
+    await orchestrator.cancel(running.job.id, ADMIN)
     assert comfy.interrupted == 1
-    del second
 
 
 async def test_cancelling_an_unknown_job_reports_false(orchestrator) -> None:
@@ -419,3 +418,46 @@ async def test_an_image_without_an_upload_service_is_refused(routing_orchestrato
     """Better a clear refusal than a job that cannot possibly run."""
     with pytest.raises(ParameterError, match="upload service"):
         await routing_orchestrator.submit(request(image=b"\x89PNG\r\n\x1a\n" + b"\x00" * 200))
+
+
+async def test_cancelling_a_queued_job_actually_removes_it_from_the_queue(
+    orchestrator, repo
+) -> None:
+    """It used to stay QUEUED for good: skipped by the worker, yet still counted as
+    active and still shown to the user as waiting."""
+    accepted = await orchestrator.submit(request(ADMIN))
+
+    assert await orchestrator.cancel(accepted.job.id, ADMIN) is True
+    job = repo.get(accepted.job.id)
+    assert job.status is JobStatus.CANCELLED
+    assert job.finished_at is not None
+    assert repo.count_active() == 0
+    assert repo.queue_snapshot() == []
+    assert repo.next_queued() is None
+
+
+async def test_a_running_job_is_left_for_the_worker_to_finish(orchestrator, repo) -> None:
+    """The worker owns a job it is running; the orchestrator only interrupts ComfyUI."""
+    accepted = await orchestrator.submit(request(ADMIN))
+    orchestrator._worker.current_job_id = accepted.job.id
+
+    assert await orchestrator.cancel(accepted.job.id, ADMIN) is True
+    assert orchestrator._comfy.interrupted == 1
+    # Still queued in this fake setup - the real worker transitions it on its next poll.
+    assert repo.is_cancel_requested(accepted.job.id)
+
+
+async def test_cancelling_frees_the_queue_for_the_next_job(orchestrator, repo) -> None:
+    first = await orchestrator.submit(request(ADMIN))
+    second = await orchestrator.submit(request(ADMIN))
+    assert second.queue_position == 2
+
+    await orchestrator.cancel(first.job.id, ADMIN)
+    assert await orchestrator.queue_position(second.job.id) == 1
+
+
+async def test_cancelling_an_already_cancelled_job_is_harmless(orchestrator, repo) -> None:
+    accepted = await orchestrator.submit(request(ADMIN))
+    assert await orchestrator.cancel(accepted.job.id, ADMIN) is True
+    assert await orchestrator.cancel(accepted.job.id, ADMIN) is False
+    assert repo.get(accepted.job.id).status is JobStatus.CANCELLED

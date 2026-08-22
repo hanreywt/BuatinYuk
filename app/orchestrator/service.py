@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.comfy.client import ComfyUIClient
-from app.jobs.models import Job, JobStatus
+from app.jobs.models import InvalidTransition, Job, JobStatus
 from app.jobs.repository import JobRepository
 from app.orchestrator.worker import GenerationWorker
 from app.users.models import User
@@ -249,14 +249,34 @@ class Orchestrator:
         owner_scope = None if user.is_admin else user.telegram_user_id
         cancelled = await asyncio.to_thread(self._jobs.request_cancel, job_id, owner_scope)
 
-        if cancelled:
-            # Only interrupt ComfyUI if this exact job is the one on the GPU.
-            if self._worker.current_job_id == job_id:
-                try:
-                    await self._comfy.interrupt()
-                except Exception as exc:  # noqa: BLE001 - cancellation is best-effort
-                    log.warning("orchestrator.interrupt_failed", job_id=job_id, error=str(exc))
-        return cancelled
+        if not cancelled:
+            return False
+
+        if self._worker.current_job_id == job_id:
+            # It holds the GPU. Interrupt ComfyUI; the worker sees the cancel flag on
+            # its next poll and moves the job to CANCELLED itself.
+            try:
+                await self._comfy.interrupt()
+            except Exception as exc:  # noqa: BLE001 - cancellation is best-effort
+                log.warning("orchestrator.interrupt_failed", job_id=job_id, error=str(exc))
+            return True
+
+        # Nothing is running it, so nothing will ever move it out of the queue. Finish
+        # it here, or it sits in QUEUED for good - skipped by the worker but still
+        # counted as active and still shown to the user as waiting.
+        for expected in (JobStatus.QUEUED, JobStatus.RECEIVED):
+            try:
+                await asyncio.to_thread(
+                    self._jobs.transition,
+                    job_id,
+                    JobStatus.CANCELLED,
+                    expect=expected,
+                    user_message="Cancelled.",
+                )
+            except (InvalidTransition, LookupError):
+                continue  # the worker claimed it first; it will handle the cancel
+            break
+        return True
 
     async def system_status(self, telegram_user_id: int) -> SystemStatus:
         self._users.authorise(telegram_user_id)

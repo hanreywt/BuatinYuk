@@ -313,7 +313,8 @@ async def test_cancelling_before_submission_skips_the_gpu(
     await asyncio.sleep(0.3)
     await worker.stop()
 
-    # A cancelled job is never claimed by the worker, so it stays queued and unsent.
+    # The worker never claims a cancelled job, so nothing reaches the GPU. Moving it
+    # out of the queue is the orchestrator's job - see test_orchestrator.py.
     assert comfy.submitted == []
 
 
