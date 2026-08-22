@@ -17,9 +17,9 @@ Telegram user
 Everything except the Telegram Bot API (and, later, Anthropic inference) runs on one
 machine. ComfyUI stays bound to `127.0.0.1`. Nothing is exposed publicly.
 
-> **Status: Phase 0 complete — environment audited, skeleton in place, no application code
-> yet.** See [PROJECT_STATUS.md](PROJECT_STATUS.md) for exactly what works, what was
-> discovered about this machine, and what to do next.
+> **Status: v0.1 code complete — awaiting a real Telegram token for the live round-trip
+> test.** 207 tests pass, and generation is verified end to end against the local GPU.
+> See [PROJECT_STATUS.md](PROJECT_STATUS.md) for what works and what to do next.
 
 ---
 
@@ -31,7 +31,7 @@ machine. ComfyUI stays bound to `127.0.0.1`. Nothing is exposed publicly.
 | Git | 2.49.0 ✅ |
 | NVIDIA GPU | RTX 3080, 10 GB ✅ |
 | ComfyUI running locally | Desktop 0.33.2 on `127.0.0.1:8188` ✅ |
-| Telegram bot token | ❌ not yet created |
+| Telegram bot token | ❌ you must create this |
 
 ## Setup
 
@@ -130,7 +130,47 @@ cannot be POSTed to `/prompt` directly.
 
 ## Running
 
-Not yet implemented — Phase 1. This section will cover starting the bot and the MCP server.
+```powershell
+.\.venv\Scripts\Activate.ps1
+python run_bot.py
+```
+
+Startup logs `bot.connected`, then `comfy.ready`, then `server.ready`. Stop with Ctrl+C —
+the worker finishes its current step and shuts down cleanly.
+
+If ComfyUI is offline the bot still starts and reports it, so you can ask `/status` what
+is wrong rather than being met with silence.
+
+### Before you run it the first time
+
+Verify the machine and the generation path without involving Telegram:
+
+```powershell
+python scripts/audit_env.py         # read-only machine + ComfyUI report
+python scripts/verify_generation.py # real generation: registry -> ComfyUI -> PNG
+python -m pytest                    # 207 tests, no GPU or network needed
+```
+
+### Commands
+
+| Command | Does |
+|---|---|
+| `/start` | Confirms you are authorised, shows your usage |
+| `/help` | Command list |
+| `/generate <text>` | Generates an image |
+| *(plain message)* | Same as `/generate` |
+| `/status` | System status; `/status <id>` for one job |
+| `/queue` | What is waiting or running |
+| `/history` | Your recent jobs |
+| `/cancel <id>` | Cancels a job of yours |
+| `/workflows` | Installed workflows and their settings |
+
+Generation takes **about two minutes** on this hardware. You get an acknowledgement with
+your queue position immediately, a progress note while it runs, and the image at the end.
+
+### Running the MCP server
+
+Not yet implemented — Phase 4.
 
 ## Troubleshooting
 
@@ -141,6 +181,10 @@ Not yet implemented — Phase 1. This section will cover starting the bot and th
 | `checkpoints: (none)` | Expected on this machine — see PROJECT_STATUS.md. |
 | Generation is very slow | 46 GB of weights on a 10 GB card means heavy offloading. Normal here. |
 | Bot does not respond | Token wrong, or your numeric ID is not in `ADMIN_TELEGRAM_IDS`. |
+| "Configuration is incomplete" on start | `run_bot.py` names the offending field. Usually a missing `.env`. |
+| "not authorised" from your own account | `ADMIN_TELEGRAM_IDS` holds a username or the wrong number. It must be your **numeric** id. |
+| Jobs queue but never start | Check `server.ready` appeared in the log, and that ComfyUI is reachable. |
+| A restart lost a job | Expected only if it was mid-generation and ComfyUI also forgot it. Check `startup.recovery` in the log. |
 
 Detailed diagnostics go to `logs/`. Messages shown to Telegram users are deliberately
 generic — no paths, no stack traces, no machine details.

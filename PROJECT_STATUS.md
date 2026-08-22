@@ -3,7 +3,7 @@
 Living handover document. **Any Claude Code session picking this project up should read
 this file first**, then run `python scripts/audit_env.py` to re-verify the machine.
 
-Last updated: 2026-08-22 · Current version: **v0.1-dev (Phase 0 done; Phase 1 + job/queue layer done)**
+Last updated: 2026-08-22 · Current version: **v0.1 code complete — awaiting live Telegram test**
 
 ---
 
@@ -12,9 +12,9 @@ Last updated: 2026-08-22 · Current version: **v0.1-dev (Phase 0 done; Phase 1 +
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 0 | Environment audit, project skeleton, docs | **DONE** |
-| 1 | Telegram -> ComfyUI MVP (single fixed workflow, single user) | **IN PROGRESS** |
+| 1 | Telegram -> ComfyUI MVP (single fixed workflow, single user) | **CODE COMPLETE**, needs live test |
 | 2 | Persistent job system + sequential GPU queue (SQLite) | **DONE** (bot integration pending) |
-| 3 | Multi-user, roles, invites, quotas, admin commands | NOT STARTED |
+| 3 | Multi-user, roles, invites, quotas, admin commands | PARTIAL — roles/quota engine built, DB-backed users + invites pending |
 | 4 | Local MCP server (narrow tools) | NOT STARTED |
 | 5 | Claude natural-language interpretation layer | NOT STARTED |
 | 6 | Video, upscale, inline buttons, retention | NOT STARTED |
@@ -102,7 +102,14 @@ Built and verified (88 tests passing, `python -m pytest`):
 | Startup recovery | `app/orchestrator/recovery.py` | Done. Reconciles interrupted jobs without duplicating GPU work. |
 | Notifier protocol | `app/orchestrator/notifier.py` | Done. Keeps Telegram out of the worker. |
 
-Still to build for v0.1: the Telegram bot itself and the application entry point.
+| Users, roles, quotas | `app/users/` | Done. Identity is the numeric Telegram id only. v0.1 authorises from `ADMIN_TELEGRAM_IDS`; Phase 3 swaps `UserService._lookup` for a DB query and nothing else changes. |
+| Orchestrator | `app/orchestrator/service.py` | Done. The single gate: authorise → quota → workflow → validate → create → queue. |
+| Telegram notifier | `app/bot/notifier.py` | Done. Never raises; falls back from photo to document, and retries unthreaded if the reply target is gone. |
+| Telegram handlers | `app/bot/handlers.py` | Done. `/start /help /generate /status /queue /history /cancel /workflows`, plus plain text as a prompt. |
+| Application wiring | `app/bot/application.py`, `run_bot.py` | Done. Verified to build, gate, and query live ComfyUI with a fake token. |
+
+**v0.1 is code complete.** Everything that can be verified without a Telegram token has
+been. What remains is section C of `docs/integration-test.md` — the live round trip.
 
 ### Measured generation performance (real run, 2026-08-22)
 
@@ -141,9 +148,9 @@ of 1800 is comfortable.
 
 ---
 
-## Open questions — BLOCKING Phase 1
+## Open questions — BLOCKING the live test
 
-1. **Telegram bot token** — not yet created. Needed in `.env` as `TELEGRAM_BOT_TOKEN`.
+1. **Telegram bot token** — owner is creating it. Needed in `.env` as `TELEGRAM_BOT_TOKEN`.
 2. **Owner's numeric Telegram user ID** — needed as `ADMIN_TELEGRAM_IDS`. From `@userinfobot`.
 3. ~~Image strategy~~ — **DECIDED 2026-08-22**: use the H3 stack as-is. An SDXL/Flux
    workflow can be added later as another template; the registry supports it with no
@@ -160,11 +167,29 @@ of 1800 is comfortable.
 
 ---
 
+## Bugs found and fixed during development
+Both were found by tests or a wiring check, not in production — worth recording so they
+are not reintroduced.
+
+1. **`PREPARING` could not return to `QUEUED`.** Startup recovery silently failed to
+   requeue a job that had never been submitted, because the transition was missing from
+   the state machine and the `except` branch swallowed it. `PREPARING → QUEUED` is now
+   legal, `GENERATING → QUEUED` is now explicitly illegal (that is the one that would
+   duplicate GPU work), and the branch logs instead of returning quietly.
+2. **A single admin id crashed startup.** `pydantic-settings` JSON-parses env values for
+   complex types, so `ADMIN_TELEGRAM_IDS=12345` arrived as an `int` while `111,222`
+   arrived as a `str`. The validator only handled strings — meaning the single-admin
+   case, the most likely real configuration, failed. It now accepts int, str, list, and
+   tuple, and rejects non-numeric input with a message naming @userinfobot.
+
 ## Next concrete action
-1. Owner creates the bot with @BotFather and fills `.env` (items 1 and 2 above).
-2. Verify the `length=5` path with one real generation (item 4) and record the timing here.
-3. Build the Telegram bot layer and the `run_bot` entry point, then do the full
-   Telegram → ComfyUI → Telegram integration test.
+1. Owner fills `.env` with the bot token and their numeric Telegram id.
+2. Run `python run_bot.py` and work through **section C** of
+   [docs/integration-test.md](docs/integration-test.md) — the live round trip, queueing,
+   cancellation, and the unauthorised-user rejection.
+3. Record the result in this file.
+4. Then Phase 3 proper (DB-backed users, invites, admin commands) or Phase 4 (MCP),
+   depending on whether friends need access before Claude interpretation does.
 
 ## Deliberately NOT done yet
 Docker, Redis, Celery, PostgreSQL, cloud anything, MCP server, Claude routing, inline

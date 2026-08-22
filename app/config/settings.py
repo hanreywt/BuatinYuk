@@ -57,10 +57,27 @@ class Settings(BaseSettings):
     @field_validator("admin_telegram_ids", mode="before")
     @classmethod
     def _parse_admin_ids(cls, value: object) -> object:
-        """Accept "111,222" or "111 222" from the environment."""
+        """Accept every shape the environment can deliver.
+
+        pydantic-settings JSON-parses env values for complex types, so a single id
+        (`ADMIN_TELEGRAM_IDS=12345`) arrives here as an int and a JSON list arrives as
+        a list, while `111,222` fails to parse and arrives as the raw string.
+        """
+        if isinstance(value, bool):
+            raise ValueError("admin_telegram_ids must be Telegram user IDs")
+        if isinstance(value, int):
+            return (value,)
         if isinstance(value, str):
             parts = [p.strip() for p in value.replace(" ", ",").split(",")]
-            return tuple(int(p) for p in parts if p)
+            try:
+                return tuple(int(p) for p in parts if p)
+            except ValueError:
+                raise ValueError(
+                    "admin_telegram_ids must be numeric Telegram user IDs, "
+                    "comma separated (get yours from @userinfobot)"
+                ) from None
+        if isinstance(value, (list, tuple, set)):
+            return tuple(int(item) for item in value)
         return value
 
     @field_validator("admin_telegram_ids")
