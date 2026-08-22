@@ -3,7 +3,7 @@
 Living handover document. **Any Claude Code session picking this project up should read
 this file first**, then run `python scripts/audit_env.py` to re-verify the machine.
 
-Last updated: 2026-08-22 · Current version: **v0.1-dev (Phase 0 done, Phase 1 foundations done)**
+Last updated: 2026-08-22 · Current version: **v0.1-dev (Phase 0 done; Phase 1 + job/queue layer done)**
 
 ---
 
@@ -13,7 +13,7 @@ Last updated: 2026-08-22 · Current version: **v0.1-dev (Phase 0 done, Phase 1 f
 |-------|-------|--------|
 | 0 | Environment audit, project skeleton, docs | **DONE** |
 | 1 | Telegram -> ComfyUI MVP (single fixed workflow, single user) | **IN PROGRESS** |
-| 2 | Persistent job system + sequential GPU queue (SQLite) | NOT STARTED |
+| 2 | Persistent job system + sequential GPU queue (SQLite) | **DONE** (bot integration pending) |
 | 3 | Multi-user, roles, invites, quotas, admin commands | NOT STARTED |
 | 4 | Local MCP server (narrow tools) | NOT STARTED |
 | 5 | Claude natural-language interpretation layer | NOT STARTED |
@@ -95,8 +95,35 @@ Built and verified (88 tests passing, `python -m pytest`):
 | ComfyUI error taxonomy | `app/comfy/errors.py` | Done. Each error carries a safe `user_message`; detail stays in logs. |
 | Workflow registry | `app/workflows/registry.py` | Done. Loads `<id>.api.json` + `<id>.meta.json`, validates every mapping against the real graph, coerces/clamps/snaps values. |
 
-Still to build for v0.1: SQLite job store, the sequential queue worker, the orchestrator,
-and the Telegram bot itself.
+| SQLite layer | `app/database/connection.py` | Done. WAL, foreign keys on, `PRAGMA user_version` migrations, refuses a database written by a newer schema. |
+| Job model + state machine | `app/jobs/models.py` | Done. 7 states with an explicit legal-transition table. |
+| Job repository | `app/jobs/repository.py` | Done. Ownership-scoped queries, guarded transitions, FIFO queue, quota counting. |
+| GPU queue worker | `app/orchestrator/worker.py` | Done. Strictly one job at a time; survives a failing notifier, a bad workflow, and ComfyUI going away. |
+| Startup recovery | `app/orchestrator/recovery.py` | Done. Reconciles interrupted jobs without duplicating GPU work. |
+| Notifier protocol | `app/orchestrator/notifier.py` | Done. Keeps Telegram out of the worker. |
+
+Still to build for v0.1: the Telegram bot itself and the application entry point.
+
+### Measured generation performance (real run, 2026-08-22)
+
+`python scripts/verify_generation.py` — full chain registry → ComfyUI → local PNG, **PASS**.
+
+| Measure | Value |
+|---|---|
+| Total wall time | **122 s** at `length=5`, 608x1088, 12 steps |
+| Text encoder load | ~56 s (first ~56 s before sampling starts) |
+| Sampling | ~37 s (12 steps, ~1.7 s/step) |
+| VAE decode + save | ~26 s |
+| Outputs | **5 PNGs**, ~875 KB each |
+| Image quality | Good — strong prompt adherence |
+
+**Implication for the bot**: `length=5` yields 5 *consecutive frames of one clip*, so they
+are near-identical. Deliver **one** to Telegram and keep the rest on disk. Do not send five
+near-duplicates.
+
+**Implication for timeouts and UX**: ~2 minutes per request means the user must get an
+immediate acknowledgement and a progress update, never a silent wait. `JOB_TIMEOUT_SECONDS`
+of 1800 is comfortable.
 
 ### Design points worth knowing
 - **Completion is decided by polling `/history`**, not by the WebSocket. The socket only
@@ -121,9 +148,7 @@ and the Telegram bot itself.
 3. ~~Image strategy~~ — **DECIDED 2026-08-22**: use the H3 stack as-is. An SDXL/Flux
    workflow can be added later as another template; the registry supports it with no
    code change.
-4. **Unverified**: no run at `length=5` has been performed. The 5-frame path is inferred
-   from the node schema (`min=5, step=17`), not observed. **Verify this before relying on
-   it** — confirm how many PNGs come back and how long it takes.
+4. ~~Unverified `length=5` path~~ — **VERIFIED 2026-08-22**, see the measured numbers below.
 
 ---
 
@@ -138,8 +163,8 @@ and the Telegram bot itself.
 ## Next concrete action
 1. Owner creates the bot with @BotFather and fills `.env` (items 1 and 2 above).
 2. Verify the `length=5` path with one real generation (item 4) and record the timing here.
-3. Build the SQLite job store + sequential queue worker, then the orchestrator, then the
-   Telegram bot. Finish with the end-to-end test in `docs/`.
+3. Build the Telegram bot layer and the `run_bot` entry point, then do the full
+   Telegram → ComfyUI → Telegram integration test.
 
 ## Deliberately NOT done yet
 Docker, Redis, Celery, PostgreSQL, cloud anything, MCP server, Claude routing, inline
