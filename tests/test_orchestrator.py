@@ -363,3 +363,59 @@ async def test_the_seed_is_recorded_so_a_result_can_be_reproduced(orchestrator, 
     accepted = await orchestrator.submit(request())
     seed = repo.get(accepted.job.id).parameters["seed"]
     assert isinstance(seed, int) and 0 <= seed < 2**32
+
+
+# ---------------- workflow routing ----------------
+
+
+@pytest.fixture
+def routing_orchestrator(repo, users, workflow_dir: Path):
+    """Registry with four distinct ids, so routing choices are observable."""
+    import json
+    from pathlib import Path as P
+
+    graph = json.loads((workflow_dir / "test_wf.api.json").read_text(encoding="utf-8"))
+    meta = json.loads((workflow_dir / "test_wf.meta.json").read_text(encoding="utf-8"))
+    for wf_id in ("test_img", "test_vid", "test_imgvid"):
+        (workflow_dir / f"{wf_id}.api.json").write_text(json.dumps(graph), encoding="utf-8")
+        (workflow_dir / f"{wf_id}.meta.json").write_text(
+            json.dumps({**meta, "workflow_id": wf_id, "graph_file": f"{wf_id}.api.json"}),
+            encoding="utf-8",
+        )
+    return Orchestrator(
+        users=users,
+        jobs=repo,
+        registry=WorkflowRegistry.load(workflow_dir, strict=True),
+        worker=FakeWorker(),
+        comfy=FakeComfy(),
+        default_workflow="test_wf",
+        uploads=None,
+        image_workflow="test_img",
+        video_workflow="test_vid",
+        image_video_workflow="test_imgvid",
+    )
+
+
+async def test_text_alone_routes_to_the_default_workflow(routing_orchestrator, repo) -> None:
+    accepted = await routing_orchestrator.submit(request())
+    assert repo.get(accepted.job.id).workflow_id == "test_wf"
+
+
+async def test_text_asking_for_video_routes_to_the_video_workflow(
+    routing_orchestrator, repo
+) -> None:
+    accepted = await routing_orchestrator.submit(request(want_video=True))
+    assert repo.get(accepted.job.id).workflow_id == "test_vid"
+
+
+async def test_an_explicit_workflow_id_overrides_routing(routing_orchestrator, repo) -> None:
+    accepted = await routing_orchestrator.submit(
+        request(want_video=True, workflow_id="test_wf")
+    )
+    assert repo.get(accepted.job.id).workflow_id == "test_wf"
+
+
+async def test_an_image_without_an_upload_service_is_refused(routing_orchestrator) -> None:
+    """Better a clear refusal than a job that cannot possibly run."""
+    with pytest.raises(ParameterError, match="upload service"):
+        await routing_orchestrator.submit(request(image=b"\x89PNG\r\n\x1a\n" + b"\x00" * 200))

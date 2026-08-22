@@ -44,6 +44,8 @@ class GenerationRequest:
     parameters: dict[str, Any] = field(default_factory=dict)
     #: Raw bytes of an input image, if the user sent one. Validated before use.
     image: bytes | None = None
+    #: Whether the user asked for video rather than a still.
+    want_video: bool = False
 
 
 @dataclass(slots=True)
@@ -101,6 +103,8 @@ class Orchestrator:
         default_workflow: str,
         uploads: UploadService | None = None,
         image_workflow: str = "img2img_h3",
+        video_workflow: str = "txt2video_h3",
+        image_video_workflow: str = "img2video_h3",
     ) -> None:
         self._users = users
         self._jobs = jobs
@@ -110,6 +114,8 @@ class Orchestrator:
         self._default_workflow = default_workflow
         self._uploads = uploads
         self._image_workflow = image_workflow
+        self._video_workflow = video_workflow
+        self._image_video_workflow = image_video_workflow
 
     # ---------------- submission ----------------
 
@@ -119,7 +125,7 @@ class Orchestrator:
         self._users.check_quota(user)
 
         workflow = self._resolve_workflow(
-            request.workflow_id or (self._image_workflow if request.image else None)
+            request.workflow_id or self._workflow_for(request)
         )
         text = self._clean_text(request.text)
 
@@ -182,6 +188,17 @@ class Orchestrator:
             queue_position=position,
         )
         return Accepted(job=job, queue_position=position, ahead_of_it=(position or 1) - 1)
+
+    def _workflow_for(self, request: GenerationRequest) -> str:
+        """Pick a workflow from what the request actually carries.
+
+        Four combinations, each with its own approved template. A request never names
+        a graph; it states what it has and what it wants.
+        """
+        has_image = request.image is not None
+        if request.want_video:
+            return self._image_video_workflow if has_image else self._video_workflow
+        return self._image_workflow if has_image else self._default_workflow
 
     def _resolve_workflow(self, workflow_id: str | None) -> WorkflowSpec:
         return self._registry.get(workflow_id or self._default_workflow)

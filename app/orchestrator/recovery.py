@@ -182,7 +182,7 @@ class RecoveryService:
                 JobOutput(
                     job_id=job.id,
                     path=path,
-                    kind=ref.kind.name.lower(),
+                    kind=ref.actual_kind.name.lower(),
                     size_bytes=path.stat().st_size,
                 ),
             )

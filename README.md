@@ -158,15 +158,17 @@ python -m pytest                    # 207 tests, no GPU or network needed
 | `/start` | Confirms you are authorised, shows your usage |
 | `/help` | Command list |
 | `/generate <text>` | Generates an image |
+| `/video <text>` | Generates a short clip with sound |
 | *(plain message)* | Same as `/generate` |
 | *(photo + caption)* | Generates from that image, using the caption as the prompt |
+| *(photo + `/video` caption)* | Animates that image into a clip |
 | `/status` | System status; `/status <id>` for one job |
 | `/queue` | What is waiting or running |
 | `/history` | Your recent jobs |
 | `/cancel <id>` | Cancels a job of yours |
 | `/workflows` | Installed workflows and their settings |
 
-Generation takes **about two minutes** on this hardware. You get an acknowledgement with
+Generation takes **about two minutes** on this hardware (a still is ~70-95s, a clip ~120s). You get an acknowledgement with
 your queue position immediately, a progress note while it runs, and the image at the end.
 
 ### Running the MCP server

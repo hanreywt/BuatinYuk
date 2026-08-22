@@ -1,0 +1,80 @@
+{
+  "workflow_id": "txt2video_h3",
+  "display_name": "Video from text (MiniMax H3)",
+  "description": "Generates a short video with audio from a text prompt.",
+  "graph_file": "txt2video_h3.api.json",
+  "task": "txt2video",
+  "output_type": "video",
+  "resource_intensity": "very_high",
+  "provenance": {
+    "source": "ComfyUI execution history",
+    "prompt_id": "eeb409b9-e724-4217-b3f3-18b2d6747636",
+    "verified_success": true,
+    "note": "Captured from a successful Rey_Explosion_H3 run. The LoadImage and ImageScale nodes were removed and node 8's optional first_frame input dropped; the rest of the chain, including the audio branch, is unchanged."
+  },
+  "parameters": {
+    "prompt": {
+      "node": "8",
+      "input": "prompt",
+      "type": "string",
+      "required": true,
+      "max_length": 2000
+    },
+    "length": {
+      "node": "8",
+      "input": "length",
+      "type": "int",
+      "default": 56,
+      "min": 5,
+      "max": 124,
+      "step": 17,
+      "note": "Frames at 24 fps. 56 is about 2.3s and is the value verified on this machine; 124 is about 5s."
+    },
+    "seed": {
+      "node": "12",
+      "input": "noise_seed",
+      "type": "int",
+      "min": 0,
+      "max": 4294967295
+    },
+    "steps": {
+      "node": "11",
+      "input": "steps",
+      "type": "int",
+      "default": 8,
+      "min": 4,
+      "max": 20,
+      "note": "The turbo LoRA is tuned for 8 steps."
+    },
+    "filename_prefix": {
+      "node": "17",
+      "input": "filename_prefix",
+      "type": "string",
+      "managed": true,
+      "note": "Set by the orchestrator per job. Never taken from user input."
+    },
+    "width": {
+      "node": "8",
+      "input": "width",
+      "type": "int",
+      "default": 768,
+      "min": 256,
+      "max": 1344,
+      "step": 32
+    },
+    "height": {
+      "node": "8",
+      "input": "height",
+      "type": "int",
+      "default": 1024,
+      "min": 256,
+      "max": 1344,
+      "step": 32
+    }
+  },
+  "unsupported": {
+    "negative_prompt": "MiniMaxH3ImageToVideo exposes no negative conditioning input.",
+    "cfg": "This graph uses BasicGuider (no CFG scale input).",
+    "model_choice": "Only one diffusion model is installed."
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "workflow_id": "img2video_h3",
+  "display_name": "Video from an image (MiniMax H3)",
+  "description": "Animates an input image into a short video with audio. Send a photo with a caption.",
+  "graph_file": "img2video_h3.api.json",
+  "task": "img2video",
+  "output_type": "video",
+  "resource_intensity": "very_high",
+  "provenance": {
+    "source": "ComfyUI execution history",
+    "prompt_id": "eeb409b9-e724-4217-b3f3-18b2d6747636",
+    "verified_success": true,
+    "note": "Captured verbatim from a successful Rey_Explosion_H3 run; only the output filename prefix is managed by this application."
+  },
+  "parameters": {
+    "prompt": {
+      "node": "8",
+      "input": "prompt",
+      "type": "string",
+      "required": true,
+      "max_length": 2000
+    },
+    "length": {
+      "node": "8",
+      "input": "length",
+      "type": "int",
+      "default": 56,
+      "min": 5,
+      "max": 124,
+      "step": 17,
+      "note": "Frames at 24 fps. 56 is about 2.3s and is the value verified on this machine; 124 is about 5s."
+    },
+    "seed": {
+      "node": "12",
+      "input": "noise_seed",
+      "type": "int",
+      "min": 0,
+      "max": 4294967295
+    },
+    "steps": {
+      "node": "11",
+      "input": "steps",
+      "type": "int",
+      "default": 8,
+      "min": 4,
+      "max": 20,
+      "note": "The turbo LoRA is tuned for 8 steps."
+    },
+    "filename_prefix": {
+      "node": "17",
+      "input": "filename_prefix",
+      "type": "string",
+      "managed": true,
+      "note": "Set by the orchestrator per job. Never taken from user input."
+    },
+    "width": {
+      "targets": [
+        {
+          "node": "8",
+          "input": "width"
+        },
+        {
+          "node": "2",
+          "input": "width"
+        }
+      ],
+      "type": "int",
+      "default": 768,
+      "min": 256,
+      "max": 1344,
+      "step": 32,
+      "note": "Drives both the generation width and the size the input image is scaled to."
+    },
+    "height": {
+      "targets": [
+        {
+          "node": "8",
+          "input": "height"
+        },
+        {
+          "node": "2",
+          "input": "height"
+        }
+      ],
+      "type": "int",
+      "default": 1024,
+      "min": 256,
+      "max": 1344,
+      "step": 32,
+      "note": "Drives both the generation height and the input image scale height."
+    },
+    "image": {
+      "node": "1",
+      "input": "image",
+      "type": "string",
+      "managed": true,
+      "max_length": 260,
+      "note": "The uploaded file's name inside ComfyUI's input directory. Set by the orchestrator after a validated upload."
+    }
+  },
+  "unsupported": {
+    "negative_prompt": "MiniMaxH3ImageToVideo exposes no negative conditioning input.",
+    "cfg": "This graph uses BasicGuider (no CFG scale input).",
+    "model_choice": "Only one diffusion model is installed."
+  }
+}

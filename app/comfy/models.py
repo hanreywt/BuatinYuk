@@ -13,6 +13,24 @@ class OutputKind(str, Enum):
     AUDIO = "audio"
 
 
+#: Which media kind a file extension represents. ComfyUI's own grouping is not
+#: reliable for this - SaveVideo reports its .mp4 under the "images" key - so the
+#: extension is what delivery and storage decide from.
+VIDEO_SUFFIXES = frozenset({".mp4", ".webm", ".mov", ".mkv", ".gif"})
+IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp"})
+AUDIO_SUFFIXES = frozenset({".mp3", ".wav", ".flac", ".ogg"})
+
+
+def kind_for_suffix(suffix: str) -> "OutputKind":
+    """Classify a produced file by its extension."""
+    lowered = suffix.lower()
+    if lowered in VIDEO_SUFFIXES:
+        return OutputKind.VIDEO
+    if lowered in AUDIO_SUFFIXES:
+        return OutputKind.AUDIO
+    return OutputKind.IMAGE
+
+
 @dataclass(frozen=True, slots=True)
 class OutputRef:
     """A file ComfyUI says it produced. All three fields come from ComfyUI, not the
@@ -26,6 +44,13 @@ class OutputRef:
     @property
     def query(self) -> dict[str, str]:
         return {"filename": self.filename, "subfolder": self.subfolder, "type": self.type}
+
+    @property
+    def actual_kind(self) -> "OutputKind":
+        """The kind implied by the filename, which outranks ComfyUI's grouping."""
+        from pathlib import PurePosixPath
+
+        return kind_for_suffix(PurePosixPath(self.filename).suffix)
 
 
 @dataclass(frozen=True, slots=True)

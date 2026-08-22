@@ -105,6 +105,8 @@ class GenerationServer:
             default_workflow=settings.default_workflow,
             uploads=UploadService(comfy=self._comfy, input_dir=settings.input_dir),
             image_workflow=settings.image_workflow,
+            video_workflow=settings.video_workflow,
+            image_video_workflow=settings.image_video_workflow,
         )
         application.bot_data["jobs"] = jobs
         application.bot_data["settings"] = settings
@@ -169,6 +171,7 @@ def _register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("start", handlers.start))
     application.add_handler(CommandHandler("help", handlers.help_command))
     application.add_handler(CommandHandler("generate", handlers.generate))
+    application.add_handler(CommandHandler("video", handlers.video))
     application.add_handler(CommandHandler("status", handlers.status))
     application.add_handler(CommandHandler("queue", handlers.queue))
     application.add_handler(CommandHandler("history", handlers.history))

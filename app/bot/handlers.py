@@ -11,6 +11,8 @@ passes through exactly the same orchestrator gates.
 
 from __future__ import annotations
 
+import re
+
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
@@ -28,8 +30,10 @@ log = get_logger(__name__)
 HELP_TEXT = """\
 *Generation*
 `/generate <description>` - generate an image
+`/video <description>` - generate a short clip with sound
 Or just send a message describing what you want.
-Send a *photo with a caption* to generate from that image.
+Send a *photo with a caption* to generate from that image,
+or start that caption with `/video` to animate it.
 
 *Your jobs*
 `/status [job id]` - system status, or one job
@@ -148,6 +152,7 @@ async def _submit(
     context: ContextTypes.DEFAULT_TYPE,
     prompt: str,
     image: bytes | None = None,
+    want_video: bool = False,
 ) -> None:
     message = update.effective_message
     accepted = await _orchestrator(context).submit(
@@ -157,9 +162,28 @@ async def _submit(
             telegram_message_id=message.message_id,
             text=prompt,
             image=image,
+            want_video=want_video,
         )
     )
-    await _reply(update, accepted.describe())
+    reply = accepted.describe()
+    if want_video:
+        reply += "\nVideo takes longer than a still - around two minutes."
+    await _reply(update, reply)
+
+
+@_handle_errors
+async def video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/video <description> - generate a short clip with sound instead of a still."""
+    prompt = " ".join(context.args) if context.args else ""
+    if not prompt.strip():
+        await _reply(
+            update,
+            "Describe the video you want, for example:\n"
+            "/video a neon Jakarta street at night, slow camera push forward\n\n"
+            "To animate a picture, send it with /video at the start of the caption.",
+        )
+        return
+    await _submit(update, context, prompt, want_video=True)
 
 
 @_handle_errors
@@ -175,11 +199,16 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     caption = (message.caption or "").strip()
+    # Telegram does not dispatch captions to command handlers, so a leading /video in
+    # the caption is recognised here instead.
+    want_video, caption = _strip_video_prefix(caption)
+
     if not caption:
         await _reply(
             update,
             "Add a caption describing what you want, then send the image again.\n"
-            'For example: "make this cinematic, neon at night"',
+            'For example: "make this cinematic, neon at night"\n'
+            "Or start the caption with /video to animate it.",
         )
         return
 
@@ -188,7 +217,20 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reply(update, "I could not read that as an image. Send a PNG or a JPEG.")
         return
 
-    await _submit(update, context, caption, image=data)
+    await _submit(update, context, caption, image=data, want_video=want_video)
+
+
+#: A caption asking for video. The word boundary matters: "/videos of cats" is a
+#: description, not a command, and must not be mistaken for one.
+_VIDEO_PREFIX = re.compile(r"^\s*(?:/video(?:@\S+)?|video:|animate:)(?=\s|$)", re.IGNORECASE)
+
+
+def _strip_video_prefix(caption: str) -> tuple[bool, str]:
+    """Detect a /video or "video:" prefix on a caption and remove it."""
+    match = _VIDEO_PREFIX.match(caption)
+    if match is None:
+        return False, caption
+    return True, caption[match.end():].strip()
 
 
 async def _download_image(message) -> bytes | None:

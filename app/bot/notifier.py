@@ -16,6 +16,7 @@ from telegram import Bot
 from telegram.constants import ChatAction
 from telegram.error import TelegramError
 
+from app.comfy.models import IMAGE_SUFFIXES, VIDEO_SUFFIXES
 from app.jobs.models import Job
 from app.utils.logging import get_logger
 
@@ -23,7 +24,9 @@ log = get_logger(__name__)
 
 #: Telegram refuses photos above 10 MB; larger files go as documents instead.
 PHOTO_SIZE_LIMIT = 10 * 1024 * 1024
-#: And documents above this cannot be sent by a bot at all.
+#: Videos sent as playable media share the same 50 MB bot ceiling as documents.
+VIDEO_SIZE_LIMIT = 50 * 1024 * 1024
+#: And nothing above this can be sent by a bot at all.
 DOCUMENT_SIZE_LIMIT = 50 * 1024 * 1024
 
 
@@ -81,9 +84,20 @@ class TelegramNotifier:
             await self._say(job, f"Job #{job.id} finished, but the file is too large to send.")
             return False
 
+        suffix = path.suffix.lower()
         try:
             with path.open("rb") as handle:
-                if size <= PHOTO_SIZE_LIMIT and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                if suffix in VIDEO_SUFFIXES and size <= VIDEO_SIZE_LIMIT:
+                    # Sent as a video so it plays inline with sound, rather than
+                    # arriving as a file the user has to download first.
+                    await self._bot.send_video(
+                        chat_id=job.telegram_chat_id,
+                        video=handle,
+                        caption=caption,
+                        supports_streaming=True,
+                        reply_to_message_id=job.telegram_message_id,
+                    )
+                elif suffix in IMAGE_SUFFIXES and size <= PHOTO_SIZE_LIMIT:
                     await self._bot.send_photo(
                         chat_id=job.telegram_chat_id,
                         photo=handle,

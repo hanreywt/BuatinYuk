@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     default_workflow: str = "txt2img_h3_plate"
     #: Used when the request carries an image instead of text alone.
     image_workflow: str = "img2img_h3"
+    #: Used when the request asks for video.
+    video_workflow: str = "txt2video_h3"
+    #: Used when the request carries an image and asks for video.
+    image_video_workflow: str = "img2video_h3"
     default_daily_quota: int = Field(default=10, ge=0)
     job_timeout_seconds: int = Field(default=1800, ge=30)
 
