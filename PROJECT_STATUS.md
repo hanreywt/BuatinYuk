@@ -3,7 +3,7 @@
 Living handover document. **Any Claude Code session picking this project up should read
 this file first**, then run `python scripts/audit_env.py` to re-verify the machine.
 
-Last updated: 2026-08-22 · Current version: **v0.0 (Phase 0 complete)**
+Last updated: 2026-08-22 · Current version: **v0.1-dev (Phase 0 done, Phase 1 foundations done)**
 
 ---
 
@@ -12,7 +12,7 @@ Last updated: 2026-08-22 · Current version: **v0.0 (Phase 0 complete)**
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 0 | Environment audit, project skeleton, docs | **DONE** |
-| 1 | Telegram -> ComfyUI MVP (single fixed workflow, single user) | NOT STARTED |
+| 1 | Telegram -> ComfyUI MVP (single fixed workflow, single user) | **IN PROGRESS** |
 | 2 | Persistent job system + sequential GPU queue (SQLite) | NOT STARTED |
 | 3 | Multi-user, roles, invites, quotas, admin commands | NOT STARTED |
 | 4 | Local MCP server (narrow tools) | NOT STARTED |
@@ -82,15 +82,48 @@ The original run used `length=73` (73 PNGs, 608x1088). For single-image jobs use
 
 ---
 
+## Phase 1 progress
+
+Built and verified (88 tests passing, `python -m pytest`):
+
+| Component | File | State |
+|---|---|---|
+| Typed configuration | `app/config/settings.py` | Done. Secrets in `SecretStr`, `__repr__` hides the token, relative paths resolve against the project root, non-loopback `COMFYUI_HOST` is refused. |
+| Path safety | `app/utils/paths.py` | Done. `sanitize_name` / `safe_join` / `assert_within`. Traversal, separators, NUL bytes, and Windows reserved device names all neutralised. |
+| Structured logging | `app/utils/logging.py` | Done. Console + rotating JSON file (5 MB x 5). Central redaction of secret-shaped keys and of anything matching a bot-token pattern. |
+| ComfyUI client | `app/comfy/client.py` | Done. Verified against the live instance: status, submit, history polling, WS progress, streamed download. |
+| ComfyUI error taxonomy | `app/comfy/errors.py` | Done. Each error carries a safe `user_message`; detail stays in logs. |
+| Workflow registry | `app/workflows/registry.py` | Done. Loads `<id>.api.json` + `<id>.meta.json`, validates every mapping against the real graph, coerces/clamps/snaps values. |
+
+Still to build for v0.1: SQLite job store, the sequential queue worker, the orchestrator,
+and the Telegram bot itself.
+
+### Design points worth knowing
+- **Completion is decided by polling `/history`**, not by the WebSocket. The socket only
+  feeds progress updates and its failure is non-fatal. A ComfyUI restart mid-job is
+  tolerated for ~5 poll cycles before the job is failed.
+- **`filename_prefix` is a `managed` parameter** — declared in the workflow metadata but
+  excluded from `user_parameters`, so a request cannot reach it. Only the orchestrator
+  passes it, via `build(..., managed={...})`.
+- **Out-of-range numbers are clamped and snapped to the node's grid** rather than
+  rejected, so ComfyUI never receives an off-grid value. Wrong *types*, unknown
+  parameters, and overlong strings are rejected outright.
+- **Client is verified against the real instance**: downloaded an actual 824 KB PNG
+  through `/view`, and confirmed a dead port yields `ComfyUnavailable` with the safe
+  message "The image generator is offline right now."
+
+---
+
 ## Open questions — BLOCKING Phase 1
 
 1. **Telegram bot token** — not yet created. Needed in `.env` as `TELEGRAM_BOT_TOKEN`.
 2. **Owner's numeric Telegram user ID** — needed as `ADMIN_TELEGRAM_IDS`. From `@userinfobot`.
-3. **Confirm the image strategy** — is "H3 at `length=5`, return frame 1" acceptable for v0.1,
-   or should an SD/SDXL/Flux checkpoint be downloaded first for a genuinely fast txt2img path?
-   (~7 GB for SDXL, ~12 GB for Flux dev; disk is tight.)
-4. **Unverified**: no test run at `length=5` has been performed yet. The 5-frame path is
-   inferred from the node schema (`min=5, step=17`), not observed. Verify before relying on it.
+3. ~~Image strategy~~ — **DECIDED 2026-08-22**: use the H3 stack as-is. An SDXL/Flux
+   workflow can be added later as another template; the registry supports it with no
+   code change.
+4. **Unverified**: no run at `length=5` has been performed. The 5-frame path is inferred
+   from the node schema (`min=5, step=17`), not observed. **Verify this before relying on
+   it** — confirm how many PNGs come back and how long it takes.
 
 ---
 
@@ -103,9 +136,10 @@ The original run used `length=73` (73 PNGs, 608x1088). For single-image jobs use
 ---
 
 ## Next concrete action
-Obtain the two Telegram values (items 1 and 2 above) and decide item 3. Then build Phase 1
-in this order: typed config -> ComfyUI client -> workflow registry -> single-user bot ->
-end-to-end test.
+1. Owner creates the bot with @BotFather and fills `.env` (items 1 and 2 above).
+2. Verify the `length=5` path with one real generation (item 4) and record the timing here.
+3. Build the SQLite job store + sequential queue worker, then the orchestrator, then the
+   Telegram bot. Finish with the end-to-end test in `docs/`.
 
 ## Deliberately NOT done yet
 Docker, Redis, Celery, PostgreSQL, cloud anything, MCP server, Claude routing, inline
