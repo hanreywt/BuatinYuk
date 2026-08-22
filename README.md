@@ -275,3 +275,7 @@ path, a URL to fetch, an MCP configuration change, or a read of another user's f
 The MCP server exposes a narrow set of generation tools. It will not offer shell execution
 or general filesystem access. Authorisation, quotas, and ownership are enforced by the
 orchestrator in code — never by model reasoning alone.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). Model weights are not included and carry their own terms.

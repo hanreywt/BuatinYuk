@@ -3,7 +3,7 @@
 Living handover document. **Any Claude Code session picking this project up should read
 this file first**, then run `python scripts/audit_env.py` to re-verify the machine.
 
-Last updated: 2026-08-22 · Current version: **v0.4 — running in daily use**
+Last updated: 2026-08-23 · Current version: **v0.5 — running in daily use, public repository**
 
 ---
 
@@ -20,10 +20,12 @@ The bot is **live and in real use**. From Telegram:
 | `/status` `/queue` `/history` `/cancel <id>` `/workflows` `/help` | deterministic, no model in the loop |
 
 Plus a **local dashboard** at `http://127.0.0.1:8765` — live queue, what is running and
-for how long, per-workflow averages, pause/resume the worker, cancel a job.
+for how long, per-workflow averages, pause/resume the worker, cancel a job, and an Admin
+tab for adding people and issuing invite codes.
 
-**311 tests pass** (`python -m pytest`). Everything below was verified on this machine,
-not assumed.
+Someone invited redeems their code in Telegram with `/redeem CODE`.
+
+**335 tests pass** (`python -m pytest`). Everything below was measured, not assumed.
 
 ---
 
@@ -34,7 +36,7 @@ not assumed.
 | 0 | Environment audit, project skeleton, docs | **DONE** |
 | 1 | Telegram → ComfyUI MVP | **DONE**, verified live |
 | 2 | Persistent jobs + sequential GPU queue | **DONE** |
-| 3 | Multi-user, roles, invites, quotas, admin commands | **PARTIAL** — role/quota engine and ownership scoping built and tested; users still come from `ADMIN_TELEGRAM_IDS`. DB-backed users, invite codes, admin commands remain |
+| 3 | Multi-user, roles, invites, quotas | **DONE** — database-backed users, single-use invite codes, per-user quotas, managed from the dashboard's Admin tab. Telegram admin commands (`/users`, `/approve`) not built; the dashboard covers it |
 | 4 | Local MCP server | NOT STARTED |
 | 5 | Claude natural-language interpretation | NOT STARTED |
 | 6 | Upscale, inline buttons, retention | NOT STARTED |
@@ -64,17 +66,19 @@ video workflows costs a reload**, because the video graph adds the audio VAE.
 
 Re-run `python scripts/audit_env.py` to refresh.
 
+> The machine details below describe the development machine these numbers were measured
+> on. Yours will differ; re-run `scripts/audit_env.py` to see your own.
+
 ### Host
 - Windows 11 Pro, **Python 3.11.9**, Git 2.49, Claude Code 2.1.238
 - **NVIDIA RTX 3080, 10 GB VRAM**, driver 591.86
-- Disk: `D:` ~99 GB free · `C:` ~26 GB free — worth watching
 
 ### ComfyUI
 - **Desktop build 0.33.2**, torch 2.12.1+cu130, its own Python 3.13
 - `http://127.0.0.1:8188` — **loopback only, no `--listen`**. Keep it that way.
-- Install: `D:\Comfy-Desktop\ComfyUI-Installs\ComfyUI\ComfyUI`
-- Output: `D:\Comfy-Desktop\ComfyUI-Shared\output` · Input: `...\input` · Models: `...\models`
-- 37 saved `Rey_*` UI workflows — a useful source of verified graphs
+- Install, output, input and model directories come from ComfyUI's own `argv`; run
+  `scripts/audit_env.py` to print yours
+- The development machine had 37 saved UI workflows — a useful source of verified graphs
 
 ### Models — the whole stack is one video model
 No image checkpoints exist. Everything runs on **MiniMax H3**:
@@ -133,11 +137,13 @@ which must not be allowed to drift apart.
 8. **Recovered results were never delivered** — recovery downloaded the file, marked the
    job complete, and stopped. From the user's side the request simply vanished.
 
-A **secret leak** also happened: a real bot token was pasted into `.env.example` (a
-tracked file) and swept into two commits by `git add -A`. The token has been revoked, and
-`scripts/check_secrets.py` now runs as a pre-commit hook. The old value remains in commits
-`d8287f0`/`551531c` by the owner's deliberate choice — it is revoked and the repo has no
-remote, so it is not an outstanding risk.
+9. **A credential reached a commit.** A real bot token was pasted into `.env.example` — a
+   *tracked* file — and swept in by `git add -A`. The token was revoked, the history was
+   rewritten so no blob in the repository has ever contained it, and
+   `scripts/check_secrets.py` now runs as a pre-commit hook. Git hooks are not cloned, so
+   each clone installs it with `python scripts/check_secrets.py --install`.
+
+   The lesson was not "be more careful". It was that nothing mechanical was checking.
 
 ---
 
@@ -160,7 +166,7 @@ Ranked by what daily use has exposed, not by the original phase order.
 6. **Draft mode** — generate at ~448×768 while iterating, full size for keepers.
 7. **Queue ordering by loaded workflow** — would avoid model reloads, at the cost of
    strict FIFO fairness. Owner's call.
-8. Phase 3 proper (DB users, invites, admin commands), Phase 4 (MCP), Phase 5 (Claude).
+8. Phase 4 (MCP server), Phase 5 (Claude natural-language interpretation).
 9. An upscale model (~64 MB); `upscale_models/` is empty.
 10. Retention — outputs only grow. Job 1 alone left 73 PNGs.
 
@@ -169,11 +175,11 @@ Ranked by what daily use has exposed, not by the original phase order.
 ## Operating it
 
 ```powershell
-cd d:\Rey_August\BuatinDong
+cd path	o\BuatinYuk
 .\.venv\Scripts\Activate.ps1
 python run_bot.py            # Ctrl+C stops cleanly
 python scripts/audit_env.py  # read-only machine check
-python -m pytest             # 311 tests, no GPU or network needed
+python -m pytest             # 335 tests, no GPU or network needed
 ```
 
 VS Code: **Run & Debug → "Run bot"**, or **Tasks → "Start bot"**. The dashboard is at
