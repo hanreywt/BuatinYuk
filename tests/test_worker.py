@@ -550,3 +550,51 @@ async def test_in_flight_jobs_are_adopted_before_queued_ones(repo, registry, tmp
     assert repo.get(waiting.id).status is JobStatus.COMPLETED
     # Only the queued one was ever submitted.
     assert len(comfy.submitted) == 1
+
+
+async def test_a_recovered_result_is_delivered_not_just_recorded(repo, tmp_path, notifier) -> None:
+    """Marking a job complete without sending it strands the result on disk."""
+    job = generating_job(repo)
+    comfy = FakeComfy()
+    comfy.history["p-1"] = {
+        "status": {"status_str": "success", "completed": True},
+        "outputs": {"3": {"images": [{"filename": "a.png", "subfolder": "", "type": "output"}]}},
+    }
+
+    await RecoveryService(
+        repository=repo, comfy=comfy, output_dir=tmp_path, notifier=notifier
+    ).reconcile()
+
+    assert notifier.completed and notifier.completed[0][0] == job.id
+    assert notifier.completed[0][1][0].exists()
+
+
+async def test_an_unrecoverable_job_tells_the_user(repo, tmp_path, notifier) -> None:
+    job = generating_job(repo, prompt_id=None)
+
+    await RecoveryService(
+        repository=repo, comfy=FakeComfy(), output_dir=tmp_path, notifier=notifier
+    ).reconcile()
+
+    assert notifier.failed and notifier.failed[0][0] == job.id
+    assert "restart" in notifier.failed[0][1].lower()
+
+
+async def test_a_broken_notifier_does_not_break_startup(repo, tmp_path) -> None:
+    class BrokenNotifier(RecordingNotifier):
+        async def job_completed(self, job, files):
+            raise RuntimeError("telegram is down")
+
+    job = generating_job(repo)
+    comfy = FakeComfy()
+    comfy.history["p-1"] = {
+        "status": {"status_str": "success", "completed": True},
+        "outputs": {"3": {"images": [{"filename": "a.png", "subfolder": "", "type": "output"}]}},
+    }
+
+    report = await RecoveryService(
+        repository=repo, comfy=comfy, output_dir=tmp_path, notifier=BrokenNotifier()
+    ).reconcile()
+
+    assert report.recovered == [job.id]
+    assert repo.get(job.id).status is JobStatus.COMPLETED

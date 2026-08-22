@@ -141,7 +141,10 @@ class GenerationServer:
 
         jobs: JobRepository = application.bot_data["jobs"]
         report = await RecoveryService(
-            repository=jobs, comfy=self._comfy, output_dir=settings.output_dir
+            repository=jobs,
+            comfy=self._comfy,
+            output_dir=settings.output_dir,
+            notifier=TelegramNotifier(application.bot),
         ).reconcile()
         if report.total:
             log.info("startup.recovery", summary=report.summary())

@@ -25,6 +25,7 @@ from app.comfy.client import ComfyUIClient
 from app.comfy.errors import ComfyError
 from app.jobs.models import InvalidTransition, Job, JobOutput, JobStatus
 from app.jobs.repository import JobRepository
+from app.orchestrator.notifier import JobNotifier, NullNotifier
 from app.utils.logging import get_logger
 from app.utils.paths import safe_join
 
@@ -71,10 +72,14 @@ class RecoveryService:
         repository: JobRepository,
         comfy: ComfyUIClient,
         output_dir: Path,
+        notifier: JobNotifier | None = None,
     ) -> None:
         self._repo = repository
         self._comfy = comfy
         self._output_dir = output_dir
+        # A job finished while we were down is still a job the user is waiting for.
+        # Marking it complete without delivering it strands the result on disk.
+        self._notifier = notifier or NullNotifier()
 
     async def reconcile(self) -> RecoveryReport:
         report = RecoveryReport()
@@ -169,6 +174,7 @@ class RecoveryService:
             self._output_dir, f"user_{job.telegram_user_id}", job.output_prefix()
         )
         stored = 0
+        files: list[Path] = []
         for index, ref in enumerate(refs, start=1):
             suffix = Path(ref.filename).suffix.lower() or ".bin"
             destination = safe_join(job_dir, f"{job.output_prefix()}_{index:03d}{suffix}")
@@ -187,17 +193,26 @@ class RecoveryService:
                 ),
             )
             stored += 1
+            files.append(path)
 
         if stored == 0:
             await self._fail(job, report, "outputs could no longer be retrieved")
             return
 
         try:
-            await asyncio.to_thread(self._repo.transition, job.id, JobStatus.COMPLETED)
+            completed = await asyncio.to_thread(
+                self._repo.transition, job.id, JobStatus.COMPLETED
+            )
         except InvalidTransition:
             return
         report.recovered.append(job.id)
         log.info("recovery.completed", job_id=job.id, outputs=stored)
+
+        # Deliver it, the same as any job that finished normally.
+        try:
+            await self._notifier.job_completed(completed, files)
+        except Exception as exc:  # noqa: BLE001 - delivery must not break startup
+            log.warning("recovery.notify_failed", job_id=job.id, error=str(exc))
 
     async def _fail(self, job: Job, report: RecoveryReport, reason: str) -> None:
         try:
@@ -212,3 +227,8 @@ class RecoveryService:
             return
         report.failed.append(job.id)
         log.info("recovery.failed", job_id=job.id, reason=reason)
+
+        try:
+            await self._notifier.job_failed(job, RECOVERED_INCOMPLETE)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("recovery.notify_failed", job_id=job.id, error=str(exc))
