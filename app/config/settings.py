@@ -9,7 +9,7 @@ from __future__ import annotations
 import functools
 from pathlib import Path
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, PrivateAttr, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -27,8 +27,18 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr = Field(
         ..., description="From @BotFather. Wrapped in SecretStr so it cannot be logged."
     )
-    admin_telegram_ids: tuple[int, ...] = Field(
-        default=(), description="Numeric Telegram user IDs with admin rights."
+    #: Declared as a plain string on purpose. pydantic-settings JSON-decodes any field
+    #: whose type is complex (tuple/list/dict), which makes ordinary spellings fail in
+    #: confusing ways: `000000000` is not valid JSON, and a bare `12345` decodes to an
+    #: int rather than a sequence. Taking the raw text and parsing it here accepts every
+    #: reasonable spelling and produces a clear error for the rest. Read the parsed value
+    #: through the `admin_telegram_ids` property.
+    admin_telegram_ids_raw: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "ADMIN_TELEGRAM_IDS", "admin_telegram_ids", "admin_telegram_ids_raw"
+        ),
+        description="Numeric Telegram user IDs with admin rights, comma separated.",
     )
 
     # ---------- ComfyUI ----------
@@ -52,41 +62,48 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    #: Parsed form of `admin_telegram_ids_raw`, filled in during validation.
+    _admin_ids: tuple[int, ...] = PrivateAttr(default=())
+
     # ---------------- validation ----------------
 
-    @field_validator("admin_telegram_ids", mode="before")
+    @field_validator("admin_telegram_ids_raw", mode="before")
     @classmethod
-    def _parse_admin_ids(cls, value: object) -> object:
-        """Accept every shape the environment can deliver.
-
-        pydantic-settings JSON-parses env values for complex types, so a single id
-        (`ADMIN_TELEGRAM_IDS=12345`) arrives here as an int and a JSON list arrives as
-        a list, while `111,222` fails to parse and arrives as the raw string.
-        """
+    def _normalise_admin_ids(cls, value: object) -> str:
+        """Accept a string, a single int, or a sequence, and reduce it to raw text."""
+        if value is None:
+            return ""
         if isinstance(value, bool):
-            raise ValueError("admin_telegram_ids must be Telegram user IDs")
+            raise ValueError("ADMIN_TELEGRAM_IDS must be numeric Telegram user IDs")
         if isinstance(value, int):
-            return (value,)
-        if isinstance(value, str):
-            parts = [p.strip() for p in value.replace(" ", ",").split(",")]
-            try:
-                return tuple(int(p) for p in parts if p)
-            except ValueError:
-                raise ValueError(
-                    "admin_telegram_ids must be numeric Telegram user IDs, "
-                    "comma separated (get yours from @userinfobot)"
-                ) from None
+            return str(value)
         if isinstance(value, (list, tuple, set)):
-            return tuple(int(item) for item in value)
-        return value
+            return ",".join(str(item) for item in value)
+        return str(value)
 
-    @field_validator("admin_telegram_ids")
-    @classmethod
-    def _admin_ids_positive(cls, value: tuple[int, ...]) -> tuple[int, ...]:
-        bad = [i for i in value if i <= 0]
+    @model_validator(mode="after")
+    def _parse_admin_ids(self) -> Settings:
+        parts = [
+            part.strip()
+            for part in self.admin_telegram_ids_raw.replace(" ", ",").split(",")
+            if part.strip()
+        ]
+        try:
+            ids = tuple(int(part) for part in parts)
+        except ValueError:
+            raise ValueError(
+                "ADMIN_TELEGRAM_IDS must be numeric Telegram user IDs, comma separated. "
+                "Get yours from @userinfobot."
+            ) from None
+
+        bad = [i for i in ids if i <= 0]
         if bad:
-            raise ValueError(f"admin_telegram_ids must be positive Telegram user IDs, got {bad}")
-        return value
+            raise ValueError(
+                f"ADMIN_TELEGRAM_IDS contains {bad}, which cannot be a Telegram user ID. "
+                "Replace the placeholder with your own numeric id from @userinfobot."
+            )
+        self._admin_ids = ids
+        return self
 
     @field_validator("database_path", "workflow_dir", "output_dir", "log_dir")
     @classmethod
@@ -105,6 +122,11 @@ class Settings(BaseSettings):
         return self
 
     # ---------------- derived ----------------
+
+    @property
+    def admin_telegram_ids(self) -> tuple[int, ...]:
+        """Numeric Telegram user IDs with admin rights."""
+        return self._admin_ids
 
     @property
     def comfyui_base_url(self) -> str:

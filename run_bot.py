@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from pydantic import ValidationError  # noqa: E402
+from pydantic_settings import SettingsError  # noqa: E402
 
 from app.bot.application import GenerationServer  # noqa: E402
 from app.config.settings import PROJECT_ROOT, get_settings  # noqa: E402
@@ -23,11 +24,16 @@ from app.utils.logging import configure_logging, get_logger  # noqa: E402
 def main() -> int:
     try:
         settings = get_settings()
-    except ValidationError as exc:
+    except (ValidationError, SettingsError) as exc:
+        # SettingsError covers values pydantic-settings could not even parse, which
+        # would otherwise surface as a raw traceback about JSON.
         print("Configuration is incomplete or invalid.\n")
-        for error in exc.errors():
-            field = ".".join(str(part) for part in error["loc"])
+        errors = exc.errors() if isinstance(exc, ValidationError) else []
+        for error in errors:
+            field = ".".join(str(part) for part in error["loc"]) or "(config)"
             print(f"  {field}: {error['msg']}")
+        if not errors:
+            print(f"  {exc}")
         env_file = PROJECT_ROOT / ".env"
         print(
             f"\nEdit {env_file}."

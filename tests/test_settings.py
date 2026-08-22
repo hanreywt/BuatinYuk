@@ -37,10 +37,21 @@ def test_admin_ids_accept_every_shape_the_env_can_deliver(given, expected) -> No
     assert settings(admin_telegram_ids=given).admin_telegram_ids == expected
 
 
-@pytest.mark.parametrize("bad", ["abc", "111,abc", True, "-5", "0"])
+@pytest.mark.parametrize("bad", ["abc", "111,abc", True, "-5", "0", "000000000"])
 def test_non_numeric_or_invalid_admin_ids_are_refused(bad) -> None:
     with pytest.raises(ValidationError):
         settings(admin_telegram_ids=bad)
+
+
+def test_the_env_example_placeholder_is_refused_with_a_useful_message() -> None:
+    """000000000 is not valid JSON either, which used to surface as a raw traceback."""
+    with pytest.raises(ValidationError, match="userinfobot"):
+        settings(admin_telegram_ids="000000000")
+
+
+def test_admin_ids_field_is_a_plain_string_so_it_is_never_json_decoded() -> None:
+    """Guards the reason this field is not typed as a tuple."""
+    assert Settings.model_fields["admin_telegram_ids_raw"].annotation is str
 
 
 def test_is_admin_checks_membership() -> None:
