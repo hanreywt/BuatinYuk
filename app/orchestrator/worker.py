@@ -105,6 +105,15 @@ class GenerationWorker:
     async def _loop(self) -> None:
         while not self._stopping.is_set():
             try:
+                # Adopt anything already running in ComfyUI first. After a restart the
+                # generation carries on there, but the worker that was waiting on it is
+                # gone - without this the result is never collected and the job sits in
+                # GENERATING for good.
+                orphan = await asyncio.to_thread(self._repo.next_generating)
+                if orphan is not None:
+                    await self._process(orphan, adopt=True)
+                    continue
+
                 job = await asyncio.to_thread(self._repo.next_queued)
                 if job is None:
                     await self._sleep(IDLE_POLL_SECONDS)
@@ -125,33 +134,45 @@ class GenerationWorker:
 
     # ---------------- one job ----------------
 
-    async def _process(self, job: Job) -> None:
+    async def _process(self, job: Job, *, adopt: bool = False) -> None:
         assert job.id is not None  # noqa: S101 - persisted jobs always have an id
         self._current_job_id = job.id
         try:
-            await self._run_job(job)
+            await self._run_job(job, adopt=adopt)
         finally:
             self._current_job_id = None
 
-    async def _run_job(self, job: Job) -> None:
+    async def _run_job(self, job: Job, *, adopt: bool = False) -> None:
         job_id = job.id
         assert job_id is not None  # noqa: S101
 
-        # Claim the job. If a cancel or another actor got here first, move on quietly.
-        try:
-            job = await asyncio.to_thread(
-                self._repo.transition, job_id, JobStatus.PREPARING, expect=JobStatus.QUEUED
+        if adopt:
+            # Already submitted and already GENERATING; pick up where the previous
+            # process left off rather than building or submitting anything again.
+            log.info("worker.job.adopted", job_id=job_id, prompt_id=job.comfy_prompt_id)
+            await self._safe_notify(
+                self._notifier.job_progress(job, "still generating after a restart")
             )
-        except InvalidTransition:
-            log.info("worker.job.claim_lost", job_id=job_id)
-            return
+        else:
+            # Claim the job. If a cancel or another actor got here first, move on quietly.
+            try:
+                job = await asyncio.to_thread(
+                    self._repo.transition, job_id, JobStatus.PREPARING, expect=JobStatus.QUEUED
+                )
+            except InvalidTransition:
+                log.info("worker.job.claim_lost", job_id=job_id)
+                return
 
-        log.info("worker.job.start", job_id=job_id, workflow=job.workflow_id)
-        await self._safe_notify(self._notifier.job_started(job))
+            log.info("worker.job.start", job_id=job_id, workflow=job.workflow_id)
+            await self._safe_notify(self._notifier.job_started(job))
 
         try:
-            graph = await self._build_graph(job)
-            prompt_id = await self._submit(job, graph)
+            if adopt:
+                prompt_id = job.comfy_prompt_id
+                assert prompt_id is not None  # noqa: S101 - next_generating requires it
+            else:
+                graph = await self._build_graph(job)
+                prompt_id = await self._submit(job, graph)
             outputs = await self._await_outputs(job, prompt_id)
             files = await self._store_outputs(job, outputs)
         except ComfyInterrupted:

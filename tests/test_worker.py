@@ -485,3 +485,68 @@ async def test_queued_jobs_survive_recovery_untouched(repo, tmp_path) -> None:
 
     assert report.total == 0
     assert repo.get(job.id).status is JobStatus.QUEUED
+
+
+# ---------------- adopting an in-flight job after a restart ----------------
+
+
+async def test_worker_adopts_a_job_left_generating_by_a_restart(
+    repo, registry, tmp_path, notifier
+) -> None:
+    """ComfyUI keeps working across our restart; the result must still be collected."""
+    job = queued_job(repo)
+    repo.transition(job.id, JobStatus.PREPARING)
+    repo.transition(job.id, JobStatus.GENERATING, comfy_prompt_id="p-orphan")
+
+    comfy = FakeComfy(outputs=[OutputRef("a.png", "", "output")])
+    finished = await drain(make_worker(repo, registry, comfy, tmp_path, notifier), repo, job.id)
+
+    assert finished.status is JobStatus.COMPLETED
+    assert len(finished.outputs) == 1
+    # It was already submitted, so it must not be submitted again.
+    assert comfy.submitted == []
+    assert notifier.completed and notifier.completed[0][0] == job.id
+
+
+async def test_an_adopted_job_is_not_regenerated(repo, registry, tmp_path, notifier) -> None:
+    """Resubmitting would cost a second full run for a result already being produced."""
+    job = queued_job(repo)
+    repo.transition(job.id, JobStatus.PREPARING)
+    repo.transition(job.id, JobStatus.GENERATING, comfy_prompt_id="p-orphan")
+
+    comfy = FakeComfy()
+    await drain(make_worker(repo, registry, comfy, tmp_path, notifier), repo, job.id)
+
+    assert comfy.submitted == []
+    assert notifier.started == []  # it did not start over from the beginning
+
+
+async def test_a_generating_job_without_a_prompt_id_is_not_adopted(repo) -> None:
+    """Nothing to wait on, so recovery must decide its fate instead."""
+    job = queued_job(repo)
+    repo.transition(job.id, JobStatus.PREPARING)
+    repo.transition(job.id, JobStatus.GENERATING)
+    assert repo.next_generating() is None
+
+
+async def test_in_flight_jobs_are_adopted_before_queued_ones(repo, registry, tmp_path, notifier) -> None:
+    """A result already being produced is worth more than starting new work."""
+    orphan = queued_job(repo)
+    repo.transition(orphan.id, JobStatus.PREPARING)
+    repo.transition(orphan.id, JobStatus.GENERATING, comfy_prompt_id="p-orphan")
+    waiting = queued_job(repo)
+
+    comfy = FakeComfy()
+    worker = make_worker(repo, registry, comfy, tmp_path, notifier)
+    await worker.start()
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        if repo.get(orphan.id).status.is_terminal and repo.get(waiting.id).status.is_terminal:
+            break
+        await asyncio.sleep(0.02)
+    await worker.stop()
+
+    assert repo.get(orphan.id).status is JobStatus.COMPLETED
+    assert repo.get(waiting.id).status is JobStatus.COMPLETED
+    # Only the queued one was ever submitted.
+    assert len(comfy.submitted) == 1

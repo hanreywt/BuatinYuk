@@ -147,6 +147,21 @@ class JobRepository:
         )
         return self._hydrate(row)
 
+    def next_generating(self) -> Job | None:
+        """A job already submitted to ComfyUI that no worker is currently watching.
+
+        After a restart the generation carries on inside ComfyUI, but the worker that
+        was waiting on it is gone. Adopting the job is what turns "still running" into
+        a delivered result rather than an orphan.
+        """
+        row = self._db.query_one(
+            f"""SELECT {_JOB_COLUMNS} FROM jobs
+                WHERE status = ? AND comfy_prompt_id IS NOT NULL
+                ORDER BY id ASC LIMIT 1""",
+            (JobStatus.GENERATING.value,),
+        )
+        return self._hydrate(row)
+
     def queue_snapshot(self) -> list[Job]:
         placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
         rows = self._db.query_all(
