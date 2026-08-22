@@ -8,7 +8,7 @@ from scripts.check_secrets import KNOWN_PLACEHOLDERS, redact, scan_text
 
 
 def test_detects_a_real_telegram_token() -> None:
-    found = scan_text("TELEGRAM_BOT_TOKEN=123456789:AAExampleFakeTokenReplaceMeWithYourOwn")
+    found = scan_text("TELEGRAM_BOT_TOKEN=999999999:AAThisIsNotARealTokenItIsATestFixture")
     assert [label for label, _ in found] == ["Telegram bot token"]
 
 
@@ -36,7 +36,7 @@ def test_ordinary_content_is_not_flagged() -> None:
 
 
 def test_reporting_never_prints_a_whole_secret() -> None:
-    token = "123456789:AAExampleFakeTokenReplaceMeWithYourOwn"
+    token = "999999999:AAThisIsNotARealTokenItIsATestFixture"
     shown = redact(token)
     assert token not in shown
-    assert shown.startswith("879186")
+    assert shown.startswith("999999")
