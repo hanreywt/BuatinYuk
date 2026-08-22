@@ -59,6 +59,9 @@ class GenerationWorker:
         self._task: asyncio.Task[None] | None = None
         self._stopping = asyncio.Event()
         self._current_job_id: int | None = None
+        # Paused means "start nothing new". A job already running is left to finish;
+        # stopping that is what cancelling is for.
+        self._paused = False
 
     # ---------------- lifecycle ----------------
 
@@ -73,6 +76,21 @@ class GenerationWorker:
     @property
     def is_running(self) -> bool:
         return self._task is not None and not self._task.done()
+
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def pause(self) -> None:
+        """Stop taking new work. The current job continues to completion."""
+        if not self._paused:
+            self._paused = True
+            log.info("worker.paused", current_job_id=self._current_job_id)
+
+    def resume(self) -> None:
+        if self._paused:
+            self._paused = False
+            log.info("worker.resumed")
 
     async def start(self) -> None:
         if self.is_running:
@@ -112,6 +130,10 @@ class GenerationWorker:
                 orphan = await asyncio.to_thread(self._repo.next_generating)
                 if orphan is not None:
                     await self._process(orphan, adopt=True)
+                    continue
+
+                if self._paused:
+                    await self._sleep(IDLE_POLL_SECONDS)
                     continue
 
                 job = await asyncio.to_thread(self._repo.next_queued)

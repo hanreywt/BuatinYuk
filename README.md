@@ -151,6 +151,19 @@ python scripts/verify_generation.py # real generation: registry -> ComfyUI -> PN
 python -m pytest                    # 207 tests, no GPU or network needed
 ```
 
+### The dashboard
+
+With the bot running, open **http://127.0.0.1:8765**. It shows the live queue, what is
+running and for how long, per-workflow average times, and recent jobs. You can pause the
+worker or cancel a job from it.
+
+It binds to loopback only and has no login, because nothing remote can reach it. Setting
+`DASHBOARD_HOST` to anything else is refused at startup. Set `DASHBOARD_ENABLED=false` to
+turn it off.
+
+*Pause* stops the worker taking **new** jobs; whatever is already running finishes. To
+stop a running job, cancel it.
+
 ### Commands
 
 | Command | Does |

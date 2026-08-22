@@ -36,6 +36,7 @@ from app.orchestrator.service import Orchestrator
 from app.orchestrator.worker import GenerationWorker
 from app.services.uploads import UploadService
 from app.users.service import UserService
+from app.web.server import Dashboard
 from app.utils.logging import get_logger
 from app.workflows.registry import WorkflowRegistry
 
@@ -50,6 +51,7 @@ class GenerationServer:
         self._database: Database | None = None
         self._comfy: ComfyUIClient | None = None
         self._worker: GenerationWorker | None = None
+        self._dashboard: Dashboard | None = None
         self._application: Application | None = None
 
     def build(self) -> Application:
@@ -108,6 +110,15 @@ class GenerationServer:
             video_workflow=settings.video_workflow,
             image_video_workflow=settings.image_video_workflow,
         )
+        if settings.dashboard_enabled:
+            self._dashboard = Dashboard(
+                jobs=jobs,
+                worker=self._worker,
+                comfy=self._comfy,
+                host=settings.dashboard_host,
+                port=settings.dashboard_port,
+            )
+
         application.bot_data["jobs"] = jobs
         application.bot_data["settings"] = settings
 
@@ -150,9 +161,17 @@ class GenerationServer:
             log.info("startup.recovery", summary=report.summary())
 
         await self._worker.start()
-        log.info("server.ready", admins=len(settings.admin_telegram_ids))
+        if self._dashboard is not None:
+            await self._dashboard.start()
+        log.info(
+            "server.ready",
+            admins=len(settings.admin_telegram_ids),
+            dashboard=self._dashboard.url if self._dashboard else None,
+        )
 
     async def _on_shutdown(self, application: Application) -> None:
+        if self._dashboard is not None:
+            await self._dashboard.stop()
         if self._worker is not None:
             await self._worker.stop()
         if self._comfy is not None:

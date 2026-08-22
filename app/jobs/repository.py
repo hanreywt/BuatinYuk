@@ -207,6 +207,42 @@ class JobRepository:
         )
         return self.count_for_user_since(telegram_user_id, midnight)
 
+    def recent(self, limit: int = 20) -> list[Job]:
+        """Newest jobs across all users. Operator view only - never user-facing."""
+        rows = self._db.query_all(
+            f"SELECT {_JOB_COLUMNS} FROM jobs ORDER BY id DESC LIMIT ?",
+            (max(1, min(limit, 200)),),
+        )
+        return [self._hydrate(row) for row in rows]
+
+    def average_duration_by_workflow(self) -> list[tuple[str, float, int]]:
+        """Mean seconds per completed job, per workflow, for showing a real estimate.
+
+        Only completed jobs count: a failure that died in two seconds would otherwise
+        drag the average down and make the estimate a lie.
+        """
+        rows = self._db.query_all(
+            """SELECT workflow_id,
+                      AVG(julianday(finished_at) - julianday(started_at)) * 86400 AS secs,
+                      COUNT(*) AS runs
+               FROM jobs
+               WHERE status = ? AND started_at IS NOT NULL AND finished_at IS NOT NULL
+               GROUP BY workflow_id
+               ORDER BY workflow_id""",
+            (JobStatus.COMPLETED.value,),
+        )
+        return [(r["workflow_id"], float(r["secs"] or 0.0), int(r["runs"])) for r in rows]
+
+    def count_completed_today(self) -> int:
+        midnight = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        row = self._db.query_one(
+            "SELECT COUNT(*) AS n FROM jobs WHERE status = ? AND created_at >= ?",
+            (JobStatus.COMPLETED.value, to_iso(midnight)),
+        )
+        return int(row["n"])
+
     # ---------------- state changes ----------------
 
     def transition(

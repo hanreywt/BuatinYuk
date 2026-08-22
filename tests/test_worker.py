@@ -598,3 +598,55 @@ async def test_a_broken_notifier_does_not_break_startup(repo, tmp_path) -> None:
 
     assert report.recovered == [job.id]
     assert repo.get(job.id).status is JobStatus.COMPLETED
+
+
+# ---------------- pause / resume ----------------
+
+
+async def test_a_paused_worker_takes_no_new_jobs(repo, registry, tmp_path, notifier) -> None:
+    comfy = FakeComfy()
+    job = queued_job(repo)
+    worker = make_worker(repo, registry, comfy, tmp_path, notifier)
+    worker.pause()
+
+    await worker.start()
+    await asyncio.sleep(0.3)
+    await worker.stop()
+
+    assert repo.get(job.id).status is JobStatus.QUEUED
+    assert comfy.submitted == []
+
+
+async def test_resuming_picks_the_queue_back_up(repo, registry, tmp_path, notifier) -> None:
+    comfy = FakeComfy()
+    job = queued_job(repo)
+    worker = make_worker(repo, registry, comfy, tmp_path, notifier)
+    worker.pause()
+    await worker.start()
+    await asyncio.sleep(0.2)
+    assert repo.get(job.id).status is JobStatus.QUEUED
+
+    worker.resume()
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        if repo.get(job.id).status.is_terminal:
+            break
+        await asyncio.sleep(0.02)
+    await worker.stop()
+
+    assert repo.get(job.id).status is JobStatus.COMPLETED
+
+
+async def test_a_paused_worker_still_adopts_an_in_flight_job(
+    repo, registry, tmp_path, notifier
+) -> None:
+    """Pause is about starting new work, not abandoning a result already being made."""
+    job = queued_job(repo)
+    repo.transition(job.id, JobStatus.PREPARING)
+    repo.transition(job.id, JobStatus.GENERATING, comfy_prompt_id="p-orphan")
+
+    worker = make_worker(repo, registry, FakeComfy(), tmp_path, notifier)
+    worker.pause()
+    finished = await drain(worker, repo, job.id)
+
+    assert finished.status is JobStatus.COMPLETED

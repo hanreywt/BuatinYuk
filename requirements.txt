@@ -6,6 +6,7 @@ pydantic==2.9.2
 pydantic-settings==2.6.1
 python-dotenv==1.0.1
 structlog==24.4.0
+aiohttp==3.14.3   # local dashboard only, bound to loopback
 
 # Dev / test
 pytest==8.3.4

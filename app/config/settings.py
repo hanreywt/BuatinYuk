@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     # ---------- Optional, not needed before v0.3 ----------
     anthropic_api_key: SecretStr | None = None
 
+    # ---------- Local dashboard ----------
+    #: Must stay on loopback: the dashboard exposes the queue and worker controls
+    #: with no authentication, because nothing remote can reach it.
+    dashboard_enabled: bool = True
+    dashboard_host: str = "127.0.0.1"
+    dashboard_port: int = Field(default=8765, ge=1, le=65535)
+
     log_level: str = "INFO"
 
     #: Parsed form of `admin_telegram_ids_raw`, filled in during validation.
@@ -127,6 +134,12 @@ class Settings(BaseSettings):
                 f"comfyui_host is {self.comfyui_host!r}. This project expects ComfyUI on "
                 "loopback. Pointing it elsewhere exposes generation to the network; "
                 "change this deliberately, not by accident."
+            )
+        if self.dashboard_host not in {"127.0.0.1", "localhost", "::1"}:
+            raise ValueError(
+                f"dashboard_host is {self.dashboard_host!r}. The dashboard has no "
+                "authentication and exposes the queue and worker controls, so it must "
+                "stay on loopback."
             )
         return self
 
