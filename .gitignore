@@ -1,0 +1,52 @@
+# --- secrets: never commit ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# --- local state ---
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*
+!data/.gitkeep
+
+# --- generated media ---
+outputs/*
+!outputs/.gitkeep
+
+# --- logs ---
+logs/*
+!logs/.gitkeep
+*.log
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- models / checkpoints (never in this repo) ---
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.gguf
+
+# --- editor / os ---
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+.idea/
+Thumbs.db
+desktop.ini

@@ -1,0 +1,91 @@
+{
+  "workflow_id": "txt2img_h3_plate",
+  "display_name": "Still plate (MiniMax H3)",
+  "description": "Generates still frames with the MiniMax H3 video model at the shortest supported clip length, then saves the frames as PNGs. This is the only image-capable stack currently installed.",
+  "graph_file": "txt2img_h3_plate.api.json",
+  "task": "txt2img",
+  "output_type": "image",
+  "resource_intensity": "high",
+  "provenance": {
+    "source": "ComfyUI execution history",
+    "prompt_id": "f813cb25-1be7-4a27-b89a-69c56eeb110d",
+    "verified_success": true,
+    "verified_on": "2026-08-22",
+    "note": "Captured from a run that completed successfully on this machine. Do not hand-edit the graph file; re-export from ComfyUI instead."
+  },
+  "parameters": {
+    "prompt": {
+      "node": "1",
+      "input": "prompt",
+      "type": "string",
+      "required": true,
+      "max_length": 2000
+    },
+    "width": {
+      "node": "1",
+      "input": "width",
+      "type": "int",
+      "default": 608,
+      "min": 256,
+      "max": 1344,
+      "step": 32
+    },
+    "height": {
+      "node": "1",
+      "input": "height",
+      "type": "int",
+      "default": 1088,
+      "min": 256,
+      "max": 1344,
+      "step": 32
+    },
+    "length": {
+      "node": "1",
+      "input": "length",
+      "type": "int",
+      "default": 5,
+      "min": 5,
+      "max": 124,
+      "step": 17,
+      "note": "Frame count. Each frame is saved as one PNG. Keep at 5 for single-image jobs."
+    },
+    "seed": {
+      "node": "7",
+      "input": "noise_seed",
+      "type": "int",
+      "min": 0,
+      "max": 4294967295
+    },
+    "steps": {
+      "node": "9",
+      "input": "steps",
+      "type": "int",
+      "default": 12,
+      "min": 4,
+      "max": 30
+    },
+    "filename_prefix": {
+      "node": "13",
+      "input": "filename_prefix",
+      "type": "string",
+      "managed": true,
+      "note": "Set by the orchestrator per job. Never taken from user input."
+    }
+  },
+  "fixed_nodes": {
+    "2": "CLIPLoader - qwen3vl_32b_minimax_h3_int8_convrot",
+    "3": "VAELoader - minimax_h3_video_vae_fp16",
+    "4": "UNETLoader - minimax_h3_fl2va_pruned_int8_convrot",
+    "5": "LoraLoaderModelOnly - minimax_h3_fl2v_turbo_8step v1.0",
+    "6": "MiniMaxH3SigmaShift",
+    "8": "KSamplerSelect - res_multistep",
+    "10": "BasicGuider",
+    "11": "SamplerCustomAdvanced",
+    "12": "VAEDecode"
+  },
+  "unsupported": {
+    "negative_prompt": "MiniMaxH3ImageToVideo exposes no negative conditioning input.",
+    "cfg": "This graph uses BasicGuider (no CFG scale input).",
+    "model_choice": "Only one diffusion model is installed."
+  }
+}
